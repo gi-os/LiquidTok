@@ -1,0 +1,8 @@
+.theos/
+packages/
+out/
+*.ipa
+*.deb
+*.p12
+*.mobileprovision
+.DS_Store

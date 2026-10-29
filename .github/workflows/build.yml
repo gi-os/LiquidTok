@@ -1,0 +1,132 @@
+name: build
+on:
+  workflow_dispatch:
+    inputs:
+      base_ipa_url:
+        description: Decrypted TikTok base IPA URL (blank = the pinned 47.5.0 release)
+        type: string
+        default: ""
+      flex:
+        description: Inject FLEXing for class discovery
+        type: boolean
+        default: false
+      udid:
+        description: Register this device UDID before signing (scripts/register_link.sh finds it)
+        type: string
+        default: ""
+      device_name:
+        description: Name for that device in the developer account
+        type: string
+        default: "Giovanni's iPhone"
+  push:
+    branches: [main]
+
+jobs:
+  # Builds the unsigned IPA. Runs third-party code (Theos, cyan, a decrypted TikTok IPA), so it gets no
+  # secrets. The base IPA is checked against Apple's signatures (scripts/verify_ipa.py) before injection.
+  ipa:
+    runs-on: macos-26
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE_IPA_URL: ${{ inputs.base_ipa_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+
+      - uses: Randomblock1/theos-action@v1
+
+      # theos-action installs GNU make but its own PATH line never reaches GITHUB_ENV.
+      - name: GNU make on PATH
+        run: echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Install cyan
+        run: pip3 install --break-system-packages https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+
+      - name: Fetch FLEXing
+        if: ${{ inputs.flex }}
+        run: gh release download -R PoomSmart/FLEXing -p '*.deb' -D out/flex --clobber
+
+      - name: Build
+        run: |
+          chmod +x scripts/*.sh
+          if [[ "${{ inputs.flex }}" == "true" ]]; then
+            ./scripts/build.sh --flex "$(ls out/flex/*.deb | head -1)"
+          else
+            ./scripts/build.sh
+          fi
+
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: LiquidTok-ipa
+          path: out/LiquidTok.ipa
+          if-no-files-found: error
+          compression-level: 0  # an IPA is already a zip
+          retention-days: 7
+
+  # Ad-hoc signs it for the devices registered in the developer account (fastlane/Fastfile), as its own
+  # bundle ID. App extensions go: each would need its own ID and profile. On success the unsigned
+  # artifact is deleted, so one IPA per run counts against artifact storage.
+  sign:
+    needs: ipa
+    runs-on: macos-26
+    permissions:
+      contents: read
+      actions: write
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_AUTH }}
+      REGISTER_UDID: ${{ inputs.udid }}
+      REGISTER_NAME: ${{ inputs.device_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: LiquidTok-ipa
+          path: out
+
+      - name: Strip app extensions
+        run: |
+          mkdir out/x && unzip -q out/LiquidTok.ipa -d out/x && rm out/LiquidTok.ipa
+          rm -rf out/x/Payload/*.app/{PlugIns,Extensions,Watch,AppClips}
+          (cd out/x && zip -qry ../unsigned.ipa Payload) && rm -rf out/x
+
+      - name: Sign
+        run: |
+          command -v fastlane >/dev/null || brew install fastlane
+          fastlane adhoc
+
+      # The repo is public, so the signed IPA (it carries the ad-hoc profile, with the devices in it)
+      # goes up encrypted to the Mac mini: a one-time key, itself encrypted to artifact-key.pub.pem, whose
+      # private half only ~/.config/liquidbird/artifact-key.pem there has (scripts/install_link.sh).
+      - name: Encrypt for the Mac mini
+        run: |
+          export LB_KEY="$(/usr/bin/openssl rand -hex 32)"
+          printf '%s' "$LB_KEY" | /usr/bin/openssl pkeyutl -encrypt -pubin -inkey artifact-key.pub.pem \
+            -pkeyopt rsa_padding_mode:oaep -out out/LiquidTok.key.enc
+          /usr/bin/openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:LB_KEY \
+            -in out/LiquidTok.ipa -out out/LiquidTok.ipa.enc
+          rm out/LiquidTok.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiquidTok-adhoc
+          path: |
+            out/LiquidTok.ipa.enc
+            out/LiquidTok.key.enc
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Delete the unsigned artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/${{ needs.ipa.outputs.artifact }}"

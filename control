@@ -1,0 +1,9 @@
+Package: com.gios.liquidtok
+Name: LiquidTok
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: TikTok without ads, sponsored and product posts, AI posts, TikTok Shop or trackers; a Duo sidebar
+Maintainer: gi-os
+Author: gi-os
+Section: Tweaks
+Depends: mobilesubstrate

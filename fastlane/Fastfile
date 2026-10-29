@@ -1,0 +1,50 @@
+# Ad-hoc signing for Giovanni's own devices: run by the workflow's sign job, which alone gets the
+# signing secrets (App Store Connect key, match password); no third-party code runs there.
+# Certificates come from gi-os/ios-certs (match), as for the kit's apps.
+default_platform(:ios)
+
+BUNDLE = "com.gios.liquidtok"   # its own ID, so it installs next to the App Store TikTok
+ROOT = File.expand_path("..", __dir__)
+
+platform :ios do
+  # Signs out/unsigned.ipa (app extensions already stripped) into out/LiquidTok.ipa.
+  lane :adhoc do
+    api_key = app_store_connect_api_key(key_id: ENV["ASC_KEY_ID"], issuer_id: ENV["ASC_ISSUER_ID"], key_content: ENV["ASC_KEY_P8"], in_house: false)
+
+    # A new device (workflow input udid, from scripts/register_link.sh) is registered first, so the
+    # profile below is remade to include it.
+    unless ENV["REGISTER_UDID"].to_s.strip.empty?
+      register_device(name: ENV["REGISTER_NAME"].to_s.strip.empty? ? "iPhone" : ENV["REGISTER_NAME"].strip,
+                      udid: ENV["REGISTER_UDID"].strip, platform: "ios", api_key: api_key)
+    end
+
+    devices = Spaceship::ConnectAPI::Device.all.select { |d| d.platform == "IOS" && d.status == "ENABLED" }
+    # Counted, not listed: the repo's logs are public.
+    UI.message("Registered devices: #{devices.count} (#{devices.map(&:device_class).tally.map { |k, v| "#{v} #{k}" }.join(', ')})")
+    UI.user_error!("No iPhone or iPad is registered in the developer account, so an ad-hoc build can't install anywhere. Register the device's UDID, then re-run.") if devices.empty?
+
+    unless Spaceship::ConnectAPI::BundleId.find(BUNDLE)
+      Spaceship::ConnectAPI::BundleId.create(name: "LiquidTok", identifier: BUNDLE, platform: "IOS")
+      UI.success("Registered bundle ID #{BUNDLE}")
+    end
+
+    setup_ci
+    match(
+      type: "adhoc",
+      app_identifier: BUNDLE,
+      git_url: "https://github.com/gi-os/ios-certs.git",
+      storage_mode: "git",
+      api_key: api_key,
+      readonly: false,
+      force_for_new_devices: true
+    )
+
+    resign(
+      ipa: File.join(ROOT, "out/unsigned.ipa"),
+      signing_identity: ENV["sigh_#{BUNDLE}_adhoc_certificate-name"],
+      provisioning_profile: ENV["sigh_#{BUNDLE}_adhoc_profile-path"],
+      bundle_id: BUNDLE
+    )
+    FileUtils.mv(File.join(ROOT, "out/unsigned.ipa"), File.join(ROOT, "out/LiquidTok.ipa"))
+  end
+end
