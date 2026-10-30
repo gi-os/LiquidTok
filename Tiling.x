@@ -20,6 +20,9 @@
 - (long long)type;
 @end
 
+@interface TTKTabBar : UIView
+@end
+
 static const CGFloat LTSidebarWindow = 600;     // wider than any iPhone upright: the Duo's poses
 static const CGFloat LTGlassWidth = 56;
 static const CGFloat LTRow = 52;
@@ -207,7 +210,9 @@ static void LTUpdateSidebar(TTKTabBarController *controller) {
         if (index == selectedIndex) selected = (NSInteger)images.count;
         UIImage *snap = LTButtonSnapshot(button);
         if (!snap) {
-            if (!blank) blank = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(1, 1)].image;
+            if (!blank)
+                blank = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(1, 1)]
+                         imageWithActions:^(UIGraphicsImageRendererContext *ctx) {}];
             snap = blank;
         }
         [images addObject:snap];
