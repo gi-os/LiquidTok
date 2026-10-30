@@ -65,6 +65,7 @@ static UIImage *LTButtonSnapshot(UIView *button) {
 // MARK: - The rail
 
 @interface LTSidebar : UIView
+@property (nonatomic) BOOL onRight;   // which edge the Duo's status strip is on
 @property (nonatomic, copy) void (^activate)(NSInteger);
 - (void)setButtonImages:(NSArray<UIImage *> *)images selected:(NSInteger)selected;
 @end
@@ -111,19 +112,17 @@ static UIImage *LTButtonSnapshot(UIView *button) {
     [self setNeedsLayout];
 }
 
-// Down the leading (left) edge, vertically centred: TikTok owns the right edge for its like/comment/
-// share column and the Duo's status bar, so a right rail collides with both; the left is clear (and is
-// where TikTok's own desktop site puts navigation). Only the glass pill takes touches.
+// On the edge where the Duo runs its status strip (set by whoever places the bar), tucked to the TOP of
+// that edge so it sits above TikTok's like/comment/share column (which runs down the centre to the
+// bottom) and below the top tab row. A compact pill, only the glass takes touches.
 - (void)layoutSubviews {
     [super layoutSubviews];
     NSUInteger n = _buttons.count;
-    CGFloat pad = 4, inner = LTGlassWidth - 2 * pad;
-    // Keep clear of the top tabs and the bottom caption: cap the rail to the middle of the height.
-    CGFloat limit = MAX(LTRow, self.bounds.size.height - 2 * (self.safeAreaInsets.top + self.safeAreaInsets.bottom + 40));
-    CGFloat row = n ? MAX(40, MIN(LTRow, floor((limit - 2 * pad) / n))) : LTRow;
+    CGFloat pad = 4, inner = LTGlassWidth - 2 * pad, row = 48;
     CGFloat rail = n * row + 2 * pad;
-    CGFloat x = MAX(self.safeAreaInsets.left, 0) + 16;
-    CGFloat y = round((self.bounds.size.height - rail) / 2);
+    CGFloat x = _onRight ? self.bounds.size.width - LTGlassWidth - 16 - MAX(self.safeAreaInsets.right - 16, 0)
+                         : 16 + MAX(self.safeAreaInsets.left - 16, 0);
+    CGFloat y = MAX(self.safeAreaInsets.top, 20) + 72;   // below the status row and the top tabs
     _rail.hidden = n == 0;
     _rail.frame = CGRectMake(x, y, LTGlassWidth, rail);
     _rail.layer.cornerRadius = LTGlassWidth / 2;
@@ -168,11 +167,15 @@ static void LTUpdateSidebar(TTKTabBarController *controller) {
     }
     if (bar.superview != host) [host addSubview:bar];
     [host bringSubviewToFront:bar];
-    // A narrow band down the left edge; the rail centres itself inside it and only its glass takes touches.
-    CGFloat band = LTGlassWidth + 32;
-    bar.frame = CGRectMake(0, 0, band, host.bounds.size.height);
-    LTLog(@"sidebar: host %@ safe %@ -> band %@", NSStringFromCGRect(host.bounds),
-          NSStringFromUIEdgeInsets(host.safeAreaInsets), NSStringFromCGRect(bar.frame));
+    // Follow the Duo: it runs the status bar down one side as a strip (a large left/right safe-area
+    // inset). Put the rail on that edge; if the status bar is on top instead (no side strip), use the
+    // trailing edge, where the Duo keeps its chrome. The rail sits at the top of the edge, clear of
+    // TikTok's own action column lower down.
+    UIEdgeInsets safe = host.safeAreaInsets;
+    bar.onRight = !(safe.left >= 40 && safe.left > safe.right);
+    bar.frame = host.bounds;
+    LTLog(@"sidebar: host %@ safe %@ -> %@", NSStringFromCGRect(host.bounds),
+          NSStringFromUIEdgeInsets(safe), bar.onRight ? @"right edge" : @"left edge");
 
     NSInteger selected = -1;
     long long selectedIndex = [controller respondsToSelector:@selector(selectedIndex)] ? [controller selectedIndex] : -1;
