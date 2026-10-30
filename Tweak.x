@@ -87,6 +87,19 @@ static LTReason LTReasonFor(id post) {
     __atomic_fetch_add(&gLTHidden[reason], 1, __ATOMIC_RELAXED);
     return nil;
 }
+// The in-feed "Search · <keyword>" teaser card comes from this; drop it.
+- (id)smartSearchTeaData { return nil; }
+%end
+
+// MARK: - Overlay info cards
+
+// The cards TikTok lays over a video above the username — "TV show · …", a location/POI, a music or
+// other content anchor. The feed's anchor element decides whether to show one; force it off.
+%group InfoCards
+%hook AWEPlayInteractionAnchorElement
+- (BOOL)shouldShowAnchorView { return NO; }
+- (BOOL)shouldShowAnchorViewWithoutCondition { return NO; }
+%end
 %end
 
 // MARK: - Splash ads
@@ -199,4 +212,5 @@ BOOL LTIsShopTabButton(UIView *button, id tabBarController) {
     if (objc_getClass("TTKTabEntranceResult")) %init(ShopTabEntrance);
     if (objc_getClass("TTKTabFCPConfigCheckResult")) %init(ShopFCP);
     if (objc_getClass("TTKTabBarController")) %init(ShopButton);
+    if (objc_getClass("AWEPlayInteractionAnchorElement")) %init(InfoCards);
 }
