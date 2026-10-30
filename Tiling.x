@@ -25,7 +25,7 @@
 
 static const CGFloat LTSidebarWindow = 600;     // wider than any iPhone upright: the Duo's unfolded pose
 static const CGFloat LTGlassWidth = 56;
-static const CGFloat LTRow = 52;
+static const CGFloat LTRow = 48;   // rail button height
 
 static const void *kLTSidebar = &kLTSidebar;
 static const void *kLTWantedAlpha = &kLTWantedAlpha;
@@ -118,7 +118,7 @@ static UIImage *LTButtonSnapshot(UIView *button) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     NSUInteger n = _buttons.count;
-    CGFloat pad = 4, inner = LTGlassWidth - 2 * pad, row = 48;
+    CGFloat pad = 4, inner = LTGlassWidth - 2 * pad, row = LTRow;
     CGFloat rail = n * row + 2 * pad;
     CGFloat x = _onRight ? self.bounds.size.width - LTGlassWidth - 16 - MAX(self.safeAreaInsets.right - 16, 0)
                          : 16 + MAX(self.safeAreaInsets.left - 16, 0);
