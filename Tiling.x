@@ -231,6 +231,45 @@ static CGFloat LTBarAlpha(UIView *v, CGFloat wanted) {
     return LTSidebarWanted(v.window) ? 0 : wanted;
 }
 
+// MARK: - Full screen on the Duo
+
+// Unlike Twitter, TikTok sizes its main windows to the screen minus the side status-bar strip (e.g. a
+// 386pt window on the Duo's 466pt display), leaving the strip black and — since the window then reports
+// no right safe-area inset — keeping the sidebar from ever triggering. Its own fold/split-shell layout
+// (TikTokPadImpl, splitShellFrameworkEnabled) is gated behind server flags that are off. So its two main
+// windows (the logged-in TTKAccountWindow and the login AWELoginWindow; popups and the small live window
+// are left alone) are grown to the full screen, which makes the strip a right safe-area inset like X's.
+static BOOL LTIsMainTikTokWindow(UIWindow *w) {
+    Class login = objc_getClass("AWELoginWindow");
+    Class account = objc_getClass("TTKAccountWindow");
+    return (account && [w isKindOfClass:account]) || (login && [w isKindOfClass:login]);
+}
+
+static void LTFillScreen(UIWindow *w) {
+    UIWindowScene *scene = w.windowScene;
+    if (!scene) return;
+    CGRect full = scene.screen.bounds;
+    CGRect f = w.frame;
+    // Letterboxed: full height, at the leading edge, but narrower than the screen by about a status-bar
+    // strip (40–160pt). A genuinely full (or folded-narrow) window has no gap and is left alone.
+    CGFloat gap = full.size.width - f.size.width;
+    if (gap > 40 && gap < 160 && fabs(full.size.height - f.size.height) < 3 &&
+        f.origin.x < 1 && !CGRectEqualToRect(f, full)) {
+        LTLog(@"Duo full-screen: %@ %@ -> %@ (safe before %@)", NSStringFromClass(w.class),
+              NSStringFromCGRect(f), NSStringFromCGRect(full), NSStringFromUIEdgeInsets(w.safeAreaInsets));
+        w.frame = full;
+    }
+}
+
+%group FullScreen
+%hook UIWindow
+- (void)layoutSubviews {
+    %orig;
+    if (LTIsMainTikTokWindow(self)) LTFillScreen(self);
+}
+%end
+%end
+
 %group Tiling
 %hook TTKTabBarController
 - (void)viewDidLayoutSubviews {
@@ -261,5 +300,6 @@ static CGFloat LTBarAlpha(UIView *v, CGFloat wanted) {
 %end
 
 %ctor {
+    if (objc_getClass("AWELoginWindow") || objc_getClass("TTKAccountWindow")) %init(FullScreen);
     if (objc_getClass("TTKTabBarController") && objc_getClass("TTKTabBar")) %init(Tiling);
 }
