@@ -5,7 +5,7 @@ INSTALL_TARGET_PROCESSES = TikTok
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = LiquidTok
-LiquidTok_FILES = Tweak.x Tracking.x Tiling.x Debug.x
+LiquidTok_FILES = Tweak.x Tracking.x Login.x Tiling.x Debug.x
 LiquidTok_CFLAGS = -fobjc-arc
 LiquidTok_FRAMEWORKS = UIKit
 
