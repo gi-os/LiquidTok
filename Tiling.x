@@ -23,44 +23,17 @@
 @interface TTKTabBar : UIView
 @end
 
-static const CGFloat LTSidebarWindow = 600;     // wider than any iPhone upright: the Duo's poses
+static const CGFloat LTSidebarWindow = 600;     // wider than any iPhone upright: the Duo's unfolded pose
 static const CGFloat LTGlassWidth = 56;
 static const CGFloat LTRow = 52;
-static const CGFloat LTStripDefault = 66;
 
 static const void *kLTSidebar = &kLTSidebar;
-static const void *kLTSideStrip = &kLTSideStrip;
 static const void *kLTWantedAlpha = &kLTWantedAlpha;
 
-// The strip down the trailing edge the Duo's status bar runs in (a right-only safe area), remembered per
-// window size: hiding the status bar takes its inset away, so the last seen value stands in meanwhile.
-static CGFloat LTSideStrip(UIWindow *w) {
-    if (!w) return 0;
-    UIEdgeInsets safe = w.safeAreaInsets;
-    NSValue *size = [NSValue valueWithCGSize:w.bounds.size];
-    NSArray *seen = objc_getAssociatedObject(w, kLTSideStrip);
-    if (safe.right >= 40 && safe.left < 20) {
-        if (![seen.lastObject isEqual:size] || fabs([seen.firstObject doubleValue] - safe.right) >= 0.5)
-            objc_setAssociatedObject(w, kLTSideStrip, @[@(safe.right), size], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        return safe.right;
-    }
-    return [seen.lastObject isEqual:size] ? [seen.firstObject doubleValue] : 0;
-}
-
 static BOOL LTSidebarWanted(UIWindow *w) {
-    if (!w) return NO;
-    return w.bounds.size.width >= LTSidebarWindow || LTSideStrip(w) > 0;
-}
-
-static CGFloat LTStripWidth(UIView *host) {
-    CGFloat r = LTSideStrip(host.window);
-    return r > 0 ? r : LTStripDefault;
-}
-
-// Under the status bar: its inset, or (on the Duo, where it runs down the side and iOS reports a 2pt top
-// line) the measured point its clock and Wi-Fi end.
-static CGFloat LTStatusBottom(UIView *host) {
-    return host.safeAreaInsets.top < 1 ? 150 : host.safeAreaInsets.top + 12;
+    // Only the Duo's wide (unfolded) pose, where there's room beside the video for a rail. The folded
+    // pose stays stock — TikTok's bottom tab bar is fine on a tall, narrow screen.
+    return w && w.bounds.size.width >= LTSidebarWindow;
 }
 
 static UIVisualEffectView *LTGlassView(void) {
@@ -92,8 +65,6 @@ static UIImage *LTButtonSnapshot(UIView *button) {
 // MARK: - The rail
 
 @interface LTSidebar : UIView
-@property (nonatomic) CGFloat top;
-@property (nonatomic) CGFloat centreOffset;
 @property (nonatomic, copy) void (^activate)(NSInteger);
 - (void)setButtonImages:(NSArray<UIImage *> *)images selected:(NSInteger)selected;
 @end
@@ -140,18 +111,21 @@ static UIImage *LTButtonSnapshot(UIView *button) {
     [self setNeedsLayout];
 }
 
+// Down the leading (left) edge, vertically centred: TikTok owns the right edge for its like/comment/
+// share column and the Duo's status bar, so a right rail collides with both; the left is clear (and is
+// where TikTok's own desktop site puts navigation). Only the glass pill takes touches.
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat mid = round(self.bounds.size.width / 2 + self.centreOffset);
-    CGFloat bottom = self.bounds.size.height - MAX(self.safeAreaInsets.bottom, 16);
-    CGFloat room = bottom - self.top;
     NSUInteger n = _buttons.count;
     CGFloat pad = 4, inner = LTGlassWidth - 2 * pad;
-    CGFloat row = n ? MAX(40, MIN(LTRow, floor((room - 2 * pad) / n))) : LTRow;
+    // Keep clear of the top tabs and the bottom caption: cap the rail to the middle of the height.
+    CGFloat limit = MAX(LTRow, self.bounds.size.height - 2 * (self.safeAreaInsets.top + self.safeAreaInsets.bottom + 40));
+    CGFloat row = n ? MAX(40, MIN(LTRow, floor((limit - 2 * pad) / n))) : LTRow;
     CGFloat rail = n * row + 2 * pad;
-    CGFloat y = bottom - rail;
+    CGFloat x = MAX(self.safeAreaInsets.left, 0) + 16;
+    CGFloat y = round((self.bounds.size.height - rail) / 2);
     _rail.hidden = n == 0;
-    _rail.frame = CGRectMake(mid - LTGlassWidth / 2, y, LTGlassWidth, rail);
+    _rail.frame = CGRectMake(x, y, LTGlassWidth, rail);
     _rail.layer.cornerRadius = LTGlassWidth / 2;
     for (NSUInteger i = 0; i < n; i++) {
         UIButton *b = _buttons[i];
@@ -194,10 +168,11 @@ static void LTUpdateSidebar(TTKTabBarController *controller) {
     }
     if (bar.superview != host) [host addSubview:bar];
     [host bringSubviewToFront:bar];
-    CGFloat strip = LTStripWidth(host);
-    bar.frame = CGRectMake(host.bounds.size.width - strip, 0, strip, host.bounds.size.height);
-    bar.top = LTStatusBottom(host);
-    bar.centreOffset = host.safeAreaInsets.top < 1 ? -5 : 0;
+    // A narrow band down the left edge; the rail centres itself inside it and only its glass takes touches.
+    CGFloat band = LTGlassWidth + 32;
+    bar.frame = CGRectMake(0, 0, band, host.bounds.size.height);
+    LTLog(@"sidebar: host %@ safe %@ -> band %@", NSStringFromCGRect(host.bounds),
+          NSStringFromUIEdgeInsets(host.safeAreaInsets), NSStringFromCGRect(bar.frame));
 
     NSInteger selected = -1;
     long long selectedIndex = [controller respondsToSelector:@selector(selectedIndex)] ? [controller selectedIndex] : -1;
