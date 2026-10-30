@@ -31,8 +31,22 @@
 %end
 %end
 
-// The embedded ad-hoc provisioning profile is the tell that it's sideloaded; hide it from lookups.
+// The app is signed and installed under its own id (com.gios.liquidtok) so it can carry Giovanni's
+// certificate and sit next to the App Store app, but ByteDance's device registration rejects an unknown
+// bundle id. The real signed id can't change (iOS validates it at launch), so TikTok's own reads of it are
+// answered with the genuine TikTok id, which is what the server expects. The community tweaks don't need
+// this only because they keep the original id when they sign in place.
+static NSString *const LTRealBundleID = @"com.zhiliaoapp.musically";
+
 %hook NSBundle
+- (NSString *)bundleIdentifier {
+    return self == [NSBundle mainBundle] ? LTRealBundleID : %orig;
+}
+- (id)objectForInfoDictionaryKey:(NSString *)key {
+    if (self == [NSBundle mainBundle] && [key isEqualToString:@"CFBundleIdentifier"]) return LTRealBundleID;
+    return %orig;
+}
+// The embedded ad-hoc provisioning profile is the tell that it's sideloaded; hide it from lookups.
 - (id)pathForResource:(id)name ofType:(id)ext {
     if ([ext isKindOfClass:NSString.class] && [ext caseInsensitiveCompare:@"mobileprovision"] == NSOrderedSame)
         return nil;
