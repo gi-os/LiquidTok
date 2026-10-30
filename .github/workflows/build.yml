@@ -25,7 +25,7 @@ jobs:
   # Builds the unsigned IPA. Runs third-party code (Theos, cyan, a decrypted TikTok IPA), so it gets no
   # secrets. The base IPA is checked against Apple's signatures (scripts/verify_ipa.py) before injection.
   ipa:
-    runs-on: macos-26
+    runs-on: xcode-27   # macOS 27 image: iOS SDK 27.x (matches the base IPA and Giovanni's iOS 27.2)
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
     env:
@@ -34,8 +34,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode 26
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - name: Select the latest Xcode 27
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_27*.app | sort -V | tail -1)"
+          echo "iOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
 
       - uses: Randomblock1/theos-action@v1
 
