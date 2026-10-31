@@ -54,6 +54,15 @@ static NSString *const LTRealBundleID = @"com.zhiliaoapp.musically";
 }
 %end
 
+// TikTok's native request signing reads the bundle id through CoreFoundation, not Obj-C — so keep that
+// path consistent with the spoof above. Otherwise some requests (profile detail, saving a post) get the
+// real id while login/feed got the spoofed one, and the server rejects the mismatch with "Something went
+// wrong". This makes every read return the id the device was registered under.
+%hookf(CFStringRef, CFBundleGetIdentifier, CFBundleRef bundle) {
+    if (bundle && bundle == CFBundleGetMainBundle()) return CFSTR("com.zhiliaoapp.musically");
+    return %orig(bundle);
+}
+
 // MARK: - Anti-tamper SDK neutralised
 
 // The security SDK that collects integrity signals and detects the injection; its mode setters return an
