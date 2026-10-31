@@ -2,9 +2,9 @@
 
 // The Duo layout. TikTok's binary is linked at 27.1 (scripts/patch_duo.sh), so the system gives it the
 // full-edge inner-display layout per Apple's Duo guidance; no runtime window resizing and no custom
-// sidebar. This file keeps TikTok's plain phone layout in every pose (no Liquid Glass tab bar, no iPad
-// split shell when unfolded), turns on the Duo fixes TikTok already ships behind server flags, keeps the
-// feed's search/corner items inside the safe area and shortens the bottom bar.
+// sidebar. This file keeps TikTok's plain phone layout in every pose (no Liquid Glass tab bar, the bottom
+// bar when unfolded, no iPad split shell), turns on the Duo fixes TikTok already ships behind server
+// flags, keeps the feed's search/corner items inside the safe area and shortens the bottom bar.
 //
 // NOT done, and why: shifting TikTok's right action column (AWEPlayInteractionRightElement rightMarginWidth)
 // to clear the status pill split the icons from their counts; and hiding the status bar on the feed VCs
@@ -72,14 +72,13 @@
 %end
 %end
 
-// MARK: - The phone layout on the unfolded Duo, not TikTok's split shell
+// MARK: - The phone shell on the unfolded Duo, not TikTok's split shell
 
 // TikTok ships its iPad "split shell" switched on for the iPhone Duo (ttk_split_framework_enable defaults
-// on for iPhone19,4) and installs it once the window is >= 816pt wide, i.e. unfolded landscape. It swaps
-// the window's root for a split host with a side panel (the "<" handle), stops TTKTabBarController sizing
-// its own content, and the four tab buttons end up squeezed top-right over the status pill. Every reader
-// funnels into one cached class method (dispatch_once, so hooked before TikTok first asks); answering NO
-// is what every other iPhone already computes, so the bottom bar and feed stay the phone ones.
+// on for iPhone19,4) and installs it once the window is >= 816pt wide (unfolded landscape): the window's
+// root becomes a split host with a side panel (the "<" handle) and TTKTabBarController stops sizing its own
+// content. Every reader goes through one cached class method (dispatch_once, so hooked before TikTok first
+// asks); NO is what every other iPhone computes. This doesn't move the tab bar; DuoBottomTabBar does.
 %group NoSplitShell
 %hook TTKTabBarManager
 + (BOOL)isSplitShellFrameworkEnabled { return NO; }
@@ -89,6 +88,40 @@
 %group NoSplitGate
 %hook TTKSplitFrameworkGate
 + (BOOL)isEnabled { return NO; }
+%end
+%end
+
+// MARK: - TikTok's bottom tab bar on the unfolded Duo
+
+// patch_duo.sh's UIDesignRequiresCompatibility=true makes TikTok hand its real TTKTabBar to UIKit
+// ([self setValue:mainTabBar forKey:@"tabBar"]; TikTok keeps the bar in its own view only when that key is
+// NO). UIKit then places it at the bottom when folded (compact width), but on the unfolded screen (regular
+// width) in its wide-screen tab container: the four buttons squeezed top-right over the status pill, or a
+// sidebar pill down the left. TikTok's own bar layout only sets the bar's y and height, so UIKit's placement
+// wins. TikTok fixes the same iPad behaviour by giving its tab bar controller a compact width class
+// (pad_updateTraitOverrides), but only on iPads. Do it here on the phone idiom: the tab bar controller reads
+// compact, so UIKit lays out the phone bottom bar, and every tab gets the window's real width class back,
+// so the screens inside don't change. Written only when it differs, so it's cheap and follows fold/unfold.
+@interface TTKTabBarController : UITabBarController
+@end
+
+%group DuoBottomTabBar
+%hook TTKTabBarController
+- (void)viewWillLayoutSubviews {
+    if (@available(iOS 17.0, *)) {
+        UITraitCollection *scene = self.view.window.windowScene.traitCollection;
+        if (scene && scene.userInterfaceIdiom == UIUserInterfaceIdiomPhone) {
+            if (self.traitCollection.horizontalSizeClass != UIUserInterfaceSizeClassCompact) {
+                self.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClassCompact;
+                LTLog(@"Duo: tab bar controller set to compact width (window h%ld)", (long)scene.horizontalSizeClass);
+            }
+            UIUserInterfaceSizeClass real = scene.horizontalSizeClass;
+            for (UIViewController *child in self.childViewControllers)
+                if (child.traitCollection.horizontalSizeClass != real) child.traitOverrides.horizontalSizeClass = real;
+        }
+    }
+    %orig;
+}
 %end
 %end
 
@@ -129,5 +162,6 @@
     if (objc_getClass("TTKTransitionTabBarSnapshotHelper")) %init(NoGlassSnapshot);
     if (objc_getClass("TTKTabBarManager")) %init(NoSplitShell);
     if (objc_getClass("TTKSplitFrameworkGate")) %init(NoSplitGate);
+    if (objc_getClass("TTKTabBarController")) %init(DuoBottomTabBar);
     if (objc_getClass("TTKABTest")) %init(DuoFixes);
 }
