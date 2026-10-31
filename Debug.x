@@ -1,6 +1,6 @@
 #import "LiquidTok.h"
 
-// Working on LiquidTok without FLEX: press and hold anywhere with three fingers and the window's view and
+// Working on LiquidTok without FLEX: press and hold anywhere with FOUR fingers and the window's view and
 // view-controller hierarchies are copied to the pasteboard, for Giovanni to paste to Claude. Classes,
 // frames, hidden/alpha, accessibility identifiers and control labels only; cells are listed by class
 // without their contents, so no post text or DMs are copied. The copy also carries what LiquidTok has
@@ -117,7 +117,7 @@ static const void *kLTDumpGesture = &kLTDumpGesture;
     if (objc_getAssociatedObject(self, kLTDumpGesture)) return;
     UILongPressGestureRecognizer *g = [[UILongPressGestureRecognizer alloc] initWithTarget:[LTDumper shared]
                                                                                     action:@selector(pressed:)];
-    g.numberOfTouchesRequired = 3;
+    g.numberOfTouchesRequired = 4;   // not 3: the Duo (iPad-class) reserves 3-finger gestures for system copy/paste
     g.minimumPressDuration = 1.0;
     g.cancelsTouchesInView = NO;
     [self addGestureRecognizer:g];
