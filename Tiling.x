@@ -1,4 +1,5 @@
 #import "LiquidTok.h"
+#import <mach-o/dyld.h>
 
 // The Duo layout. TikTok's binary is linked at 27.1 (scripts/patch_duo.sh), so the system gives it the
 // full-edge inner-display layout per Apple's Duo guidance; no runtime window resizing and no custom
@@ -22,6 +23,22 @@
 %end
 %end
 
+// TikTok only gives the top bar's corner items a horizontal safe-area inset on some layouts
+// (+topNavigationEdgeItemSafeAreaInsetInView:atLeft: returns 0 otherwise), so on the Duo's poses with the
+// status-bar strip the search button sat at x=411 of 466, under the status pill. When TikTok says 0 but
+// the view really has a side inset, use it: the corner moves out of the strip and the tab row narrows to
+// fit. Plain iPhones have no side inset in portrait, so nothing changes there.
+%group CornerSafeArea
+%hook TTKFeedTopTabUIConfig
++ (double)topNavigationEdgeItemSafeAreaInsetInView:(UIView *)view atLeft:(BOOL)atLeft {
+    double inset = %orig;
+    if (inset > 0 || ![view isKindOfClass:UIView.class]) return inset;
+    UIEdgeInsets safe = view.safeAreaInsets;
+    return atLeft ? safe.left : safe.right;
+}
+%end
+%end
+
 // MARK: - A slightly shorter bottom tab bar
 
 // The manager is the single authority contentViewDesireFrame reads, so one hook moves both the bar and
@@ -40,12 +57,31 @@
 // Giovanni wants TikTok's plain bar, so the gate, the bar's own check and the button layout all say no.
 %group NoGlassConfig
 %hook TTKTabBarLiquidGlassConfig
-+ (BOOL)isLiquidGlassTabBarAllowed { return NO; }
-+ (BOOL)liquidGlassABEnabled { return NO; }
-+ (BOOL)foldScreenLiquidGlassEnabled { return NO; }
-+ (BOOL)nonFullScreenLiquidGlassEnabled { return NO; }
++ (BOOL)isLiquidGlassTabBarAllowed { return NO; }   // its ObjC callers; LTPinGlassGateOff covers the Swift ones
 %end
 %end
+
+// The gate is Swift: its ObjC method and its 12 direct Swift callers (tab bar setup, colours, layout, button
+// layout, background alpha) all branch through one function pointer in MusicallyCore's writable __DATA
+// (trampoline 0x1aeced34 loads slot 0x331702f8; arm64, no pointer authentication). Point it at a C "no", but
+// only if it still holds 47.5.0's target, so any other TikTok build is left alone.
+static BOOL LTNoLiquidGlassTabBar(void) { return NO; }
+
+static void LTPinGlassGateOff(void) {
+    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (!name || !strstr(name, "/MusicallyCore.framework/MusicallyCore")) continue;
+        uintptr_t base = (uintptr_t)_dyld_get_image_header(i);   // __TEXT's vmaddr is 0, so the header is the slide
+        uintptr_t *slot = (uintptr_t *)(base + 0x331702f8);
+        if (*slot == base + 0x1aececec) {
+            *slot = (uintptr_t)LTNoLiquidGlassTabBar;
+            LTLog(@"Duo: TikTok's Liquid Glass tab bar gate pinned to NO");
+        } else {
+            LTLog(@"Duo: the Liquid Glass gate slot isn't 47.5.0's; left alone");
+        }
+        return;
+    }
+}
 
 %group NoGlassDependency
 %hook TTKBizUIComponentDependencyImpl
@@ -124,13 +160,32 @@
 %end
 %end
 
-// MARK: - No empty glass capsule from UIKit's copy of the bar
+// MARK: - No glass from UIKit's copy of the bar
 
-// iOS 27.1 lays a Duo app's standard bars out in the status-bar strip, so UIKit's stand-in tab bar shows as
-// an empty Liquid Glass capsule down the trailing edge, over the feed's buttons. The stand-in itself can't
-// be touched (it's a proxy for TikTok's real bar), so hide the UIKit containers drawn around it: only
-// UIKit's own (_UI...) views, and never one that holds TikTok's real bar or the screen's content.
+// TikTok keeps its real TTKTabBar as a direct subview of the tab bar controller's view and gives UIKit a
+// stand-in, TTKFakeTabBar, that forwards alpha/hidden/frame/bounds/addSubview: to the real bar, so it's
+// never touched here (hiding it hides TikTok's bar). Two kinds of UIKit chrome get drawn for it on the Duo:
+//  - around/beside it: iOS 27.1 lays the tab bar out in the status strip, an empty Liquid Glass capsule
+//    (_UITabContainerView's floating host, _UITabBarExpansionPlatterContainer);
+//  - inside TikTok's real bar: UIKit's glass item platter (UIKit._UITabBarItemPlatterView, its selection
+//    lens) arrives through the stand-in's forwarded addSubview:. Zero-width when folded, but full width on
+//    the unfolded portrait screen, where it's the glass pill behind the four buttons.
+// Hide only UIKit's own views, and never one that holds TikTok's real bar or a tab's content.
 static Class gLTStandInTabBarClass;
+
+static BOOL LTHoldsTikTokViews(UIView *container, UIView *real, UIViewController *tabs) {
+    if ([real isDescendantOfView:container]) return YES;
+    for (UIViewController *c in tabs.childViewControllers)
+        if (c.viewIfLoaded && [c.viewIfLoaded isDescendantOfView:container]) return YES;
+    return NO;
+}
+
+static void LTHideChrome(UIView *v, NSString *where) {
+    if (v.alpha == 0 && !v.userInteractionEnabled) return;
+    v.alpha = 0;
+    v.userInteractionEnabled = NO;
+    LTLog(@"Duo: hid UIKit's %@ %@ %@ the tab bar", NSStringFromClass(v.class), NSStringFromCGRect(v.frame), where);
+}
 
 %group HideStandInChrome
 %hook TTKTabBarController
@@ -138,19 +193,23 @@ static Class gLTStandInTabBarClass;
     %orig;
     UITabBar *standIn = self.tabBar;
     if (!gLTStandInTabBarClass || ![standIn isKindOfClass:gLTStandInTabBarClass]) return;   // TikTok-owns mode only
-    UIView *real = LTObj(standIn, @"realBar");
-    UIView *content = self.selectedViewController.viewIfLoaded;
-    NSMutableArray<UIView *> *chrome = [NSMutableArray array];
-    for (UIView *v = standIn.superview; v && v != self.view; v = v.superview) [chrome addObject:v];
-    for (UIView *v in self.view.subviews)
-        if ([NSStringFromClass(v.class) rangeOfString:@"Tab"].location != NSNotFound) [chrome addObject:v];
-    for (UIView *v in chrome) {
-        if (v == real || ![NSStringFromClass(v.class) hasPrefix:@"_UI"] || v.alpha == 0) continue;
-        if ((real && [real isDescendantOfView:v]) || (content && [content isDescendantOfView:v])) continue;
-        v.alpha = 0;
-        v.userInteractionEnabled = NO;
-        LTLog(@"Duo: hid UIKit's %@ %@ around the stand-in tab bar", NSStringFromClass(v.class), NSStringFromCGRect(v.frame));
+    UIView *view = self.view, *real = LTObj(self, @"visualTabBar");                          // TikTok's own TTKTabBar
+    if (![real isKindOfClass:UIView.class] || real == standIn || real.superview != view) return;
+    if (!standIn.layer.hidden) {   // TikTok hides the stand-in's own layer at init; the layer isn't proxied
+        standIn.layer.hidden = YES;
+        LTLog(@"Duo: UIKit had shown the stand-in tab bar's layer; hid it again");
     }
+    for (UIView *a = standIn.superview; a && a != view; a = a.superview) {
+        if ([view isDescendantOfView:a]) break;                                               // never above this controller
+        if ([NSStringFromClass(a.class) hasPrefix:@"_UI"] && !LTHoldsTikTokViews(a, real, self)) LTHideChrome(a, @"around");
+    }
+    for (UIView *v in view.subviews) {
+        NSString *name = NSStringFromClass(v.class);
+        if ([name hasPrefix:@"_UI"] && [name rangeOfString:@"Tab"].location != NSNotFound && !LTHoldsTikTokViews(v, real, self))
+            LTHideChrome(v, @"beside");
+    }
+    for (UIView *v in real.subviews)
+        if ([NSStringFromClass(v.class) rangeOfString:@"_UITabBar"].location != NSNotFound) LTHideChrome(v, @"inside");
 }
 %end
 %end
@@ -184,8 +243,9 @@ static Class gLTStandInTabBarClass;
 
 %ctor {
     if (objc_getClass("AWEFeedContainerViewController")) %init(SearchSafeArea);
+    if (objc_getClass("TTKFeedTopTabUIConfig")) %init(CornerSafeArea);
     if (objc_getClass("TTKTabBarManager")) %init(TabHeight);
-    if (objc_getClass("TTKTabBarLiquidGlassConfig")) %init(NoGlassConfig);
+    if (objc_getClass("TTKTabBarLiquidGlassConfig")) { %init(NoGlassConfig); LTPinGlassGateOff(); }
     if (objc_getClass("TTKBizUIComponentDependencyImpl")) %init(NoGlassDependency);
     if (objc_getClass("TTKTabBar")) %init(NoGlassBar);
     if (objc_getClass("TTKTabBarButtonDefaultContentView")) %init(NoGlassButtons);
