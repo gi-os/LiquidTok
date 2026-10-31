@@ -277,7 +277,16 @@ static void LTFillScreen(UIWindow *w) {
 %end
 %end
 
+// A shorter bottom tab bar: trim its height (and with it the dead space below the row). The manager is
+// the single authority contentViewDesireFrame reads, so one hook moves both the bar and the content.
+%group TabHeight
+%hook TTKTabBarManager
+- (double)heightForTabBar:(id)tabBar { return MAX(44.0, %orig - 16.0); }
+%end
+%end
+
 %ctor {
     if (objc_getClass("AWELoginWindow") || objc_getClass("TTKAccountWindow")) %init(FullScreen);
     if (objc_getClass("TTKTabBarController") && objc_getClass("TTKTabBar")) %init(Tiling);
+    if (objc_getClass("TTKTabBarManager")) %init(TabHeight);
 }

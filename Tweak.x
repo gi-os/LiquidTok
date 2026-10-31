@@ -110,6 +110,14 @@ static LTReason LTReasonFor(id post) {
 %end
 %end
 
+// The red "+" follow badge on the author's avatar in the feed's action column: keep it off.
+%group FollowButton
+%hook AWEPlayInteractionUserAvatarElement
+- (BOOL)canFollowAuthor { return NO; }
+- (void)switchFollowButtonVisibility:(BOOL)visible { %orig(NO); }
+%end
+%end
+
 // MARK: - Splash ads
 
 // TikTok's own "skip this splash" switch, and the ad SDK's decision to show one.
@@ -221,4 +229,5 @@ BOOL LTIsShopTabButton(UIView *button, id tabBarController) {
     if (objc_getClass("TTKTabFCPConfigCheckResult")) %init(ShopFCP);
     if (objc_getClass("TTKTabBarController")) %init(ShopButton);
     if (objc_getClass("AWEPlayInteractionAnchorElement")) %init(InfoCards);
+    if (objc_getClass("AWEPlayInteractionUserAvatarElement")) %init(FollowButton);
 }
