@@ -17,6 +17,9 @@
 %end
 %end
 
+@interface AWEFeedContainerViewController : UIViewController @end
+@interface AWEFeedRootViewController : UIViewController @end
+
 // MARK: - Hide the Duo's status pill in the feed
 
 // On the Duo, the status bar is a Liquid Glass pill running down the trailing edge, over the feed and its
