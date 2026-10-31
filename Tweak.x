@@ -89,6 +89,14 @@ static LTReason LTReasonFor(id post) {
 }
 // The in-feed "Search · <keyword>" teaser card comes from this; drop it.
 - (id)smartSearchTeaData { return nil; }
+
+// No LIVE suggestions in the feed: without the live-stream data a post can't parse as a live card, so
+// the recommended lives TikTok threads into For You stop appearing (BHTikTok/TweakiTok's disableLive).
++ (id)liveStreamURLJSONTransformer { return nil; }
++ (id)relatedLiveJSONTransformer { return nil; }
++ (id)rawModelFromLiveRoomModel:(id)model { return nil; }
++ (id)aweLiveRoom_subModelPropertyKey { return nil; }
+- (BOOL)judgeWhetherHasLiveRoomModel { return NO; }
 %end
 
 // MARK: - Overlay info cards
