@@ -119,6 +119,7 @@ static LTReason LTReasonFor(id post) {
 %end
 
 // The LIVE button in the feed's top bar.
+@interface AWELiveFeedEntranceView : UIView @end
 %group LiveButton
 %hook AWELiveFeedEntranceView
 - (void)didMoveToWindow { %orig; self.hidden = YES; }
