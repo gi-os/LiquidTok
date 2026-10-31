@@ -39,6 +39,18 @@ static void LTFillScreen(UIWindow *w) {
 %end
 %end
 
+// MARK: - Keep the feed's top corner items clear of the Duo camera
+
+// The feed's top corner items (the search button, etc.) must stay inside the safe area so they don't
+// slide under the Duo's inner camera once the 27.1 full-edge layout extends content to the top edge.
+// TikTok otherwise lets a corner item ignore the safe area; make it respect it (Apple's Duo guidance:
+// interactive controls belong inside the safe area).
+%group SearchSafeArea
+%hook AWEFeedContainerViewController
+- (BOOL)p_shouldIgnoreSafeAreaForEdgeItem:(id)item atPosition:(long long)position { return NO; }
+%end
+%end
+
 // MARK: - A slightly shorter bottom tab bar
 
 // The manager is the single authority contentViewDesireFrame reads, so one hook moves both the bar and
@@ -51,5 +63,6 @@ static void LTFillScreen(UIWindow *w) {
 
 %ctor {
     if (objc_getClass("AWELoginWindow") || objc_getClass("TTKAccountWindow")) %init(FullScreen);
+    if (objc_getClass("AWEFeedContainerViewController")) %init(SearchSafeArea);
     if (objc_getClass("TTKTabBarManager")) %init(TabHeight);
 }
