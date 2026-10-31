@@ -118,6 +118,14 @@ static LTReason LTReasonFor(id post) {
 %end
 %end
 
+// The LIVE button in the feed's top bar.
+%group LiveButton
+%hook AWELiveFeedEntranceView
+- (void)didMoveToWindow { %orig; self.hidden = YES; }
+- (void)layoutSubviews { %orig; self.hidden = YES; }
+%end
+%end
+
 // MARK: - Splash ads
 
 // TikTok's own "skip this splash" switch, and the ad SDK's decision to show one.
@@ -230,4 +238,5 @@ BOOL LTIsShopTabButton(UIView *button, id tabBarController) {
     if (objc_getClass("TTKTabBarController")) %init(ShopButton);
     if (objc_getClass("AWEPlayInteractionAnchorElement")) %init(InfoCards);
     if (objc_getClass("AWEPlayInteractionUserAvatarElement")) %init(FollowButton);
+    if (objc_getClass("AWELiveFeedEntranceView")) %init(LiveButton);
 }
