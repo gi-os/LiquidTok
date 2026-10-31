@@ -33,6 +33,10 @@ python3 -I scripts/verify_ipa.py "$IPA"
 ./scripts/patch_duo.sh "$IPA" out/TikTok-duo.ipa
 IPA="out/TikTok-duo.ipa"
 
+# A diagnostic build (LT_DUMP_URL set, from the workflow's dump_url input) reports its layout to
+# scripts/dump_receiver.sh on the Mac mini; any other build gets an empty header and no reporting.
+if [[ -n "${LT_DUMP_URL:-}" ]]; then printf '#define LT_DUMP_URL "%s"\n' "$LT_DUMP_URL" > DumpURL.h; else : > DumpURL.h; fi
+
 rm -rf packages   # make clean keeps old debs, and every deb here gets injected
 make clean package FINALPACKAGE=1
 

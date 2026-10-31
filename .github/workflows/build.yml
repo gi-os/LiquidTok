@@ -18,6 +18,10 @@ on:
         description: Name for that device in the developer account
         type: string
         default: "Giovanni's iPhone"
+      dump_url:
+        description: Diagnostic build that reports its layout here (scripts/dump_receiver.sh prints it)
+        type: string
+        default: ""
   push:
     branches: [main]
 
@@ -31,7 +35,12 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       BASE_IPA_URL: ${{ inputs.base_ipa_url }}
+      LT_DUMP_URL: ${{ inputs.dump_url }}
     steps:
+      - name: Keep the diagnostic URL out of the log
+        if: ${{ inputs.dump_url != '' }}
+        run: echo "::add-mask::$LT_DUMP_URL"
+
       - uses: actions/checkout@v4
 
       - name: Select the latest Xcode 27

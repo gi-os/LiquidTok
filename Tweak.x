@@ -1,10 +1,10 @@
 #import "LiquidTok.h"
 
-// What the feed doesn't show, decided on TikTok's own post model (AWEAwemeModel, a Mantle model): a post
-// that's an ad, sponsored, selling something or labelled AI-generated comes back nil from
-// -initWithDictionary:error:, so no feed, profile grid or search result gets it (BHTikTok's ad filter,
-// widened). And TikTok Shop's tab, top tab and entrances are taken out of the tab configs TikTok builds its
-// bars from. Class and property names are from TikTok 47.5's ObjC metadata (scripts/objc_dump.py).
+// What the feed doesn't show, decided on TikTok's own post model (AWEAwemeModel): a post that's an ad,
+// sponsored, selling something or labelled AI-generated is dropped from the parsed list of posts a feed,
+// profile, hashtag or sound page receives. And TikTok Shop's tab, top tab and entrances are taken out of the
+// tab configs TikTok builds its bars from. Class and property names are from TikTok 47.5's ObjC metadata
+// (scripts/objc_dump.py).
 
 // MARK: - Switches
 
@@ -77,16 +77,69 @@ static LTReason LTReasonFor(id post) {
     return LTKeep;
 }
 
-%hook AWEAwemeModel
-- (id)initWithDictionary:(id)dictionary error:(id *)error {
-    id post = %orig;
-    if (!post) return post;
-    LTReason reason = LTKeep;
-    @try { reason = LTReasonFor(post); } @catch (__unused NSException *e) {}
-    if (reason == LTKeep) return post;
-    __atomic_fetch_add(&gLTHidden[reason], 1, __ATOMIC_RELAXED);
-    return nil;
+// Posts are dropped from the list after it's parsed, not by failing the post's own parse: TikTok reads a
+// page of posts with Mantle, where one post that fails to parse fails the whole page, so every refresh with
+// an ad in it was thrown away and the feed sat on the videos it already had. Filtering the parsed list
+// keeps the page (and its paging cursors) valid; TikTok just gets a slightly shorter page.
+static Class gLTPostClass;
+
+static NSArray *LTFilteredPosts(NSArray *list) {
+    if (![list isKindOfClass:NSArray.class] || !list.count || !gLTPostClass) return list;
+    NSMutableArray *kept = nil;
+    NSUInteger i = 0;
+    for (id post in list) {
+        LTReason reason = LTKeep;
+        if ([post isKindOfClass:gLTPostClass]) {
+            @try { reason = LTReasonFor(post); } @catch (__unused NSException *e) {}
+        }
+        if (reason != LTKeep) {
+            if (!kept) kept = [[list subarrayWithRange:NSMakeRange(0, i)] mutableCopy];
+            __atomic_fetch_add(&gLTHidden[reason], 1, __ATOMIC_RELAXED);
+        } else if (kept) {
+            [kept addObject:post];
+        }
+        i++;
+    }
+    if (!kept) return list;   // nothing hidden: hand back the same array
+    return [list isKindOfClass:NSMutableArray.class] ? kept : [kept copy];
 }
+
+// The response models a page of posts is parsed into (every class in 47.5 that has its own -setAwemeList:,
+// less the view/bridge/data-controller ones). Mantle fills them through the setter. Left out on purpose:
+// your own Saved and Liked lists, which are things you chose to keep.
+static NSString *const LTPostLists[] = {
+    // For You, Following, refresh, nearby
+    @"AWEAwemeResponseModel", @"AWEFreshAwemeResponseModel", @"AWEAwemeMultiResponseModel",
+    @"TTKFeedDataResponseResult", @"TTKFeedBaseResponseModel", @"AWEExtensionAwemeResponseModel",
+    @"TTKLandscapeRecommendFeedResponseModel", @"TikTokNearbyFeedResponseModel",
+    // someone's profile posts
+    @"TTKCreditPostAwemeListResponse",
+    // hashtag, sound, topic, sticker/effect, template pages
+    @"AWEChallengeAwemeListResponse", @"AWEMusicAwemeListResponse", @"TTKTopicAwemeListResponse",
+    @"AWEStickerAwemeResponse", @"AWEMvAwemeResponse", @"AWETemplateAwemeResponse",
+    @"AWEUniversalCreationAwemeResponse", @"TTKEffectResponse", @"TTKMusicFeaturedVideoResponseModel",
+    @"TTKMusicTrendingHashtagVideosResponse",
+};
+
+static void LTFilterListSetter(NSString *className) {
+    Class cls = NSClassFromString(className);
+    SEL sel = @selector(setAwemeList:);
+    if (!cls) return;
+    // Only the class's own setter (a subclass that inherits one is already covered by its superclass).
+    Method own = NULL;
+    unsigned int n = 0;
+    Method *methods = class_copyMethodList(cls, &n);
+    for (unsigned int i = 0; i < n; i++)
+        if (method_getName(methods[i]) == sel) { own = methods[i]; break; }
+    free(methods);
+    if (!own || strncmp(method_getTypeEncoding(own), "v24@0:8@16", 10) != 0) return;
+    IMP orig = method_getImplementation(own);
+    method_setImplementation(own, imp_implementationWithBlock(^(id model, NSArray *list) {
+        ((void (*)(id, SEL, NSArray *))orig)(model, sel, LTFilteredPosts(list));
+    }));
+}
+
+%hook AWEAwemeModel
 // The in-feed "Search · <keyword>" teaser card comes from this; drop it.
 - (id)smartSearchTeaData { return nil; }
 
@@ -118,7 +171,14 @@ static LTReason LTReasonFor(id post) {
 %end
 %end
 
-// The LIVE button in the feed's top bar.
+// The LIVE button in the feed's top-left corner is a corner item that TikTok asks before showing it.
+%group LiveCorner
+%hook TTKFeedTabCornerLiveItem
+- (BOOL)canShowWithPosition:(long long)position { return NO; }
+%end
+%end
+
+// The LIVE bubble that floats over the top bar.
 @interface AWELiveFeedEntranceView : UIView @end
 %group LiveButton
 %hook AWELiveFeedEntranceView
@@ -229,7 +289,9 @@ BOOL LTIsShopTabButton(UIView *button, id tabBarController) {
     [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil queue:nil
                                                 usingBlock:^(NSNotification *n) { LTRefreshFlags(); }];
 
-    if (objc_getClass("AWEAwemeModel")) %init;
+    gLTPostClass = objc_getClass("AWEAwemeModel");
+    if (gLTPostClass) %init;
+    for (NSUInteger i = 0; i < sizeof(LTPostLists) / sizeof(*LTPostLists); i++) LTFilterListSetter(LTPostLists[i]);
     if (objc_getClass("AWESplashManager")) %init(Splash);
     if (objc_getClass("BDASplashManager")) %init(BDASplash);
     if (objc_getClass("TTKFeedTopTabControlConfig")) %init(ShopTopTabs);
@@ -240,4 +302,5 @@ BOOL LTIsShopTabButton(UIView *button, id tabBarController) {
     if (objc_getClass("AWEPlayInteractionAnchorElement")) %init(InfoCards);
     if (objc_getClass("AWEPlayInteractionUserAvatarElement")) %init(FollowButton);
     if (objc_getClass("AWELiveFeedEntranceView")) %init(LiveButton);
+    if (objc_getClass("TTKFeedTabCornerLiveItem")) %init(LiveCorner);
 }
