@@ -93,15 +93,14 @@
 
 // MARK: - TikTok's bottom tab bar on the unfolded Duo
 
-// patch_duo.sh's UIDesignRequiresCompatibility=true makes TikTok hand its real TTKTabBar to UIKit
-// ([self setValue:mainTabBar forKey:@"tabBar"]; TikTok keeps the bar in its own view only when that key is
-// NO). UIKit then places it at the bottom when folded (compact width), but on the unfolded screen (regular
-// width) in its wide-screen tab container: the four buttons squeezed top-right over the status pill, or a
-// sidebar pill down the left. TikTok's own bar layout only sets the bar's y and height, so UIKit's placement
-// wins. TikTok fixes the same iPad behaviour by giving its tab bar controller a compact width class
-// (pad_updateTraitOverrides), but only on iPads. Do it here on the phone idiom: the tab bar controller reads
-// compact, so UIKit lays out the phone bottom bar, and every tab gets the window's real width class back,
-// so the screens inside don't change. Written only when it differs, so it's cheap and follows fold/unfold.
+// TikTok keeps its real TTKTabBar in its own view and hands UIKit a stand-in (TTKFakeTabBar, a proxy whose
+// frame/alpha/hidden go straight to the real bar). On the unfolded screen (regular width) UIKit lays tab
+// bars out in its wide-screen container, top-right or as a sidebar, and that frame reaches the real bar
+// through the proxy. TikTok fixes the same iPad behaviour by giving its tab bar controller a compact width
+// class (pad_updateTraitOverrides), but only on iPads. Do it here on the phone idiom: the tab bar controller
+// reads compact, so UIKit lays out the phone bottom bar, and every tab gets the window's real width class
+// back, so the screens inside don't change. Written only when it differs, so it's cheap and follows
+// fold/unfold.
 @interface TTKTabBarController : UITabBarController
 @end
 
@@ -121,6 +120,37 @@
         }
     }
     %orig;
+}
+%end
+%end
+
+// MARK: - No empty glass capsule from UIKit's copy of the bar
+
+// iOS 27.1 lays a Duo app's standard bars out in the status-bar strip, so UIKit's stand-in tab bar shows as
+// an empty Liquid Glass capsule down the trailing edge, over the feed's buttons. The stand-in itself can't
+// be touched (it's a proxy for TikTok's real bar), so hide the UIKit containers drawn around it: only
+// UIKit's own (_UI...) views, and never one that holds TikTok's real bar or the screen's content.
+static Class gLTStandInTabBarClass;
+
+%group HideStandInChrome
+%hook TTKTabBarController
+- (void)viewDidLayoutSubviews {
+    %orig;
+    UITabBar *standIn = self.tabBar;
+    if (!gLTStandInTabBarClass || ![standIn isKindOfClass:gLTStandInTabBarClass]) return;   // TikTok-owns mode only
+    UIView *real = LTObj(standIn, @"realBar");
+    UIView *content = self.selectedViewController.viewIfLoaded;
+    NSMutableArray<UIView *> *chrome = [NSMutableArray array];
+    for (UIView *v = standIn.superview; v && v != self.view; v = v.superview) [chrome addObject:v];
+    for (UIView *v in self.view.subviews)
+        if ([NSStringFromClass(v.class) rangeOfString:@"Tab"].location != NSNotFound) [chrome addObject:v];
+    for (UIView *v in chrome) {
+        if (v == real || ![NSStringFromClass(v.class) hasPrefix:@"_UI"] || v.alpha == 0) continue;
+        if ((real && [real isDescendantOfView:v]) || (content && [content isDescendantOfView:v])) continue;
+        v.alpha = 0;
+        v.userInteractionEnabled = NO;
+        LTLog(@"Duo: hid UIKit's %@ %@ around the stand-in tab bar", NSStringFromClass(v.class), NSStringFromCGRect(v.frame));
+    }
 }
 %end
 %end
@@ -163,5 +193,7 @@
     if (objc_getClass("TTKTabBarManager")) %init(NoSplitShell);
     if (objc_getClass("TTKSplitFrameworkGate")) %init(NoSplitGate);
     if (objc_getClass("TTKTabBarController")) %init(DuoBottomTabBar);
+    gLTStandInTabBarClass = objc_getClass("TTKFakeTabBar");
+    if (gLTStandInTabBarClass && objc_getClass("TTKTabBarController")) %init(HideStandInChrome);
     if (objc_getClass("TTKABTest")) %init(DuoFixes);
 }

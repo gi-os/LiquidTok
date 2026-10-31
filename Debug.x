@@ -139,11 +139,79 @@ static NSString *LTDumpText(UIWindow *w) {
 }
 @end
 
+static const void *kLTDumpGesture = &kLTDumpGesture;
+
+static void LTAttachDumpGesture(UIWindow *w) {
+    if (!w || objc_getAssociatedObject(w, kLTDumpGesture)) return;
+    UILongPressGestureRecognizer *g = [[UILongPressGestureRecognizer alloc] initWithTarget:[LTDumper shared]
+                                                                                    action:@selector(pressed:)];
+    g.numberOfTouchesRequired = 4;   // not 3: the Duo reserves 3-finger gestures for system copy/paste
+    g.minimumPressDuration = 1.0;
+    g.cancelsTouchesInView = NO;
+    [w addGestureRecognizer:g];
+    objc_setAssociatedObject(w, kLTDumpGesture, g, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// Every window of every connected scene, and the key one (or the first foreground one's first window).
+static UIWindow *LTEachWindow(void (^body)(UIWindow *)) {
+    UIWindow *key = nil, *first = nil;
+    for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) {
+        if (![sc isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *win in ((UIWindowScene *)sc).windows) {
+            if (body) body(win);
+            if (win.isKeyWindow) key = win;
+            if (!first && sc.activationState == UISceneActivationStateForegroundActive) first = win;
+        }
+    }
+    return key ?: first;
+}
+
 #ifdef LT_DUMP_URL
-// Diagnostic builds only: send the same dump to Giovanni's Mac mini (scripts/dump_receiver.sh) whenever the
+#import <Network/Network.h>
+
+// Diagnostic builds only: send the dump to Giovanni's Mac mini (scripts/dump_receiver.sh) whenever the
 // window's shape or the screen on top changes (launch, fold/unfold, rotation, another tab, a profile), so
 // the Duo layout can be fixed from real frames without anyone pasting anything. At most one every 8s and
-// 60 per launch.
+// 60 per launch. Sent over Network.framework, not NSURLSession (TikTok's network stack hooks the URL
+// loading system, and the first diagnostic build's reports never arrived), and started from the tweak's
+// constructor and app activation rather than -becomeKeyWindow, which TikTok's window may not reach.
+static void LTPost(NSString *reason, NSData *body) {
+    static dispatch_queue_t queue;
+    static NSURL *url;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        queue = dispatch_queue_create("liquidtok.dump", DISPATCH_QUEUE_SERIAL);
+        url = [NSURL URLWithString:@LT_DUMP_URL];
+    });
+    if (!url.host.length || !body) return;
+    NSMutableData *request = [[[NSString stringWithFormat:@"POST %@ HTTP/1.1\r\nHost: %@\r\nContent-Type: text/plain; charset=utf-8\r\n"
+                                                          @"X-LT-Reason: %@\r\nContent-Length: %lu\r\nConnection: close\r\n\r\n",
+                                url.path, url.host, reason, (unsigned long)body.length]
+                               dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+    [request appendData:body];
+    nw_parameters_t params = nw_parameters_create_secure_tcp(NW_PARAMETERS_DEFAULT_CONFIGURATION,
+                                                             NW_PARAMETERS_DEFAULT_CONFIGURATION);
+    __block nw_connection_t connection = nw_connection_create(nw_endpoint_create_host(url.host.UTF8String, "443"), params);
+    nw_connection_set_queue(connection, queue);
+    // The handler holds the connection until it's cancelled, then lets go.
+    nw_connection_set_state_changed_handler(connection, ^(nw_connection_state_t state, nw_error_t error) {
+        if (state == nw_connection_state_ready) {
+            dispatch_data_t data = dispatch_data_create(request.bytes, request.length, queue, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+            nw_connection_send(connection, data, NW_CONNECTION_FINAL_MESSAGE_CONTEXT, true, ^(nw_error_t sendError) {
+                nw_connection_receive(connection, 1, 4096, ^(dispatch_data_t content, nw_content_context_t context,
+                                                             bool complete, nw_error_t receiveError) {
+                    nw_connection_cancel(connection);
+                });
+            });
+        } else if (state == nw_connection_state_failed) {
+            nw_connection_cancel(connection);
+        } else if (state == nw_connection_state_cancelled) {
+            connection = nil;
+        }
+    });
+    nw_connection_start(connection);
+}
+
 static NSString *LTShape(UIWindow *w) {
     NSMutableString *shape = [NSMutableString stringWithFormat:@"%@ h%ld v%ld", NSStringFromCGRect(w.bounds),
                               (long)w.traitCollection.horizontalSizeClass, (long)w.traitCollection.verticalSizeClass];
@@ -158,40 +226,28 @@ static NSString *LTShape(UIWindow *w) {
     return shape;
 }
 
-static void LTSendDump(UIWindow *w, NSString *reason) {
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@LT_DUMP_URL]];
-    req.HTTPMethod = @"POST";
-    [req setValue:reason forHTTPHeaderField:@"X-LT-Reason"];
-    [req setValue:@"text/plain; charset=utf-8" forHTTPHeaderField:@"Content-Type"];
-    req.HTTPBody = [LTDumpText(w) dataUsingEncoding:NSUTF8StringEncoding];
-    static NSURLSession *session;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration];
-    });
-    [[session dataTaskWithRequest:req] resume];
-}
-
 static void LTStartAutoDump(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
+        NSDictionary *info = NSBundle.mainBundle.infoDictionary;
+        LTPost(@"hello", [[NSString stringWithFormat:@"hello: LiquidTok diagnostic build %@, iOS %@, designCompat %@\n",
+                           info[@"CFBundleVersion"], UIDevice.currentDevice.systemVersion,
+                           info[@"UIDesignRequiresCompatibility"]] dataUsingEncoding:NSUTF8StringEncoding]);
         static NSString *last;
         static int sent;
         dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-        dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)), (uint64_t)(8 * NSEC_PER_SEC), (uint64_t)NSEC_PER_SEC);
+        dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
+                                  (uint64_t)(8 * NSEC_PER_SEC), (uint64_t)NSEC_PER_SEC);
         dispatch_source_set_event_handler(t, ^{
             if (sent >= 60 || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
-            UIWindow *w = nil;
-            for (UIScene *sc in UIApplication.sharedApplication.connectedScenes)
-                if ([sc isKindOfClass:UIWindowScene.class])
-                    for (UIWindow *win in ((UIWindowScene *)sc).windows) if (win.isKeyWindow) w = win;
+            UIWindow *w = LTEachWindow(^(UIWindow *win) { LTAttachDumpGesture(win); });
             if (!w) return;
             NSString *shape = LTShape(w);
             if ([shape isEqualToString:last]) return;
             NSString *reason = last ? @"change" : @"launch";
             last = shape;
             sent++;
-            LTSendDump(w, reason);
+            LTPost(reason, [LTDumpText(w) dataUsingEncoding:NSUTF8StringEncoding]);
         });
         dispatch_resume(t);
         objc_setAssociatedObject(UIApplication.sharedApplication, &once, t, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -199,21 +255,51 @@ static void LTStartAutoDump(void) {
 }
 #endif
 
-static const void *kLTDumpGesture = &kLTDumpGesture;
+// TikTok's API errors, into the log the dump carries: every response is parsed through Mantle, so a
+// non-zero status_code (and its status_msg), or a response model that fails to parse, shows up here with
+// the response class. How "Something went wrong" on profiles and saving gets a real reason.
+@interface MTLJSONAdapter : NSObject
+@end
+
+%group APIErrors
+%hook MTLJSONAdapter
++ (id)modelOfClass:(Class)modelClass fromJSONDictionary:(NSDictionary *)json error:(NSError **)error {
+    id model = %orig;
+    if ([json isKindOfClass:NSDictionary.class]) {
+        id code = json[@"status_code"];
+        if ([code respondsToSelector:@selector(integerValue)] && [code integerValue] != 0) {
+            id msg = json[@"status_msg"] ?: json[@"message"];
+            LTLog(@"API %@: status_code %@ %@", NSStringFromClass(modelClass), code,
+                  [msg isKindOfClass:NSString.class] ? [msg substringToIndex:MIN([msg length], (NSUInteger)120)] : @"");
+        } else if (!model && [NSStringFromClass(modelClass) rangeOfString:@"Response"].location != NSNotFound) {
+            LTLog(@"API %@: didn't parse (%@)", NSStringFromClass(modelClass),
+                  error && *error ? (*error).localizedDescription : @"no error");
+        }
+    }
+    return model;
+}
+%end
+%end
 
 %hook UIWindow
 - (void)becomeKeyWindow {
     %orig;
-#ifdef LT_DUMP_URL
-    LTStartAutoDump();
-#endif
-    if (objc_getAssociatedObject(self, kLTDumpGesture)) return;
-    UILongPressGestureRecognizer *g = [[UILongPressGestureRecognizer alloc] initWithTarget:[LTDumper shared]
-                                                                                    action:@selector(pressed:)];
-    g.numberOfTouchesRequired = 4;   // not 3: the Duo (iPad-class) reserves 3-finger gestures for system copy/paste
-    g.minimumPressDuration = 1.0;
-    g.cancelsTouchesInView = NO;
-    [self addGestureRecognizer:g];
-    objc_setAssociatedObject(self, kLTDumpGesture, g, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    LTAttachDumpGesture(self);
 }
 %end
+
+%ctor {
+    %init;
+    if (objc_getClass("MTLJSONAdapter")) %init(APIErrors);
+    // Also attach from app activation: TikTok's window may never reach -becomeKeyWindow.
+    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil
+                                                     queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
+        LTEachWindow(^(UIWindow *win) { LTAttachDumpGesture(win); });
+#ifdef LT_DUMP_URL
+        LTStartAutoDump();
+#endif
+    }];
+#ifdef LT_DUMP_URL
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ LTStartAutoDump(); });
+#endif
+}

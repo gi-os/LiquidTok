@@ -171,10 +171,43 @@ static void LTFilterListSetter(NSString *className) {
 %end
 %end
 
-// The LIVE button in the feed's top-left corner is a corner item that TikTok asks before showing it.
+// The LIVE button in the feed's top-left corner is a corner item (TTKFeedTabCornerLiveItem). Asking it not
+// to show (-canShowWithPosition:) wasn't enough on the Duo, so it's also kept out of the corner lists the
+// item manager builds the top bar from.
+static Class gLTLiveCornerClass;
+
+static BOOL LTIsLiveCorner(id item) {
+    return gLTLiveCornerClass && [item isKindOfClass:gLTLiveCornerClass];
+}
+
 %group LiveCorner
 %hook TTKFeedTabCornerLiveItem
 - (BOOL)canShowWithPosition:(long long)position { return NO; }
+%end
+%end
+
+%group LiveCornerList
+%hook TTKFeedTabCornerItemManager
+- (void)addTabCornerItem:(id)item {
+    if (LTIsLiveCorner(item)) { LTLog(@"LIVE: corner item left out"); return; }
+    %orig;
+}
+- (void)setTabCornerItems:(NSArray *)items {
+    if ([items isKindOfClass:NSArray.class]) {
+        NSIndexSet *live = [items indexesOfObjectsPassingTest:^BOOL(id item, NSUInteger i, BOOL *stop) { return LTIsLiveCorner(item); }];
+        if (live.count) {
+            NSMutableArray *kept = [items mutableCopy];
+            [kept removeObjectsAtIndexes:live];
+            LTLog(@"LIVE: corner item left out of the list");
+            items = [items isKindOfClass:NSMutableArray.class] ? kept : [kept copy];
+        }
+    }
+    %orig(items);
+}
+- (void)replaceTabCornerItem:(id)item index:(unsigned long long)index {
+    if (LTIsLiveCorner(item)) return;
+    %orig;
+}
 %end
 %end
 
@@ -302,5 +335,7 @@ BOOL LTIsShopTabButton(UIView *button, id tabBarController) {
     if (objc_getClass("AWEPlayInteractionAnchorElement")) %init(InfoCards);
     if (objc_getClass("AWEPlayInteractionUserAvatarElement")) %init(FollowButton);
     if (objc_getClass("AWELiveFeedEntranceView")) %init(LiveButton);
-    if (objc_getClass("TTKFeedTabCornerLiveItem")) %init(LiveCorner);
+    gLTLiveCornerClass = objc_getClass("TTKFeedTabCornerLiveItem");
+    if (gLTLiveCornerClass) %init(LiveCorner);
+    if (gLTLiveCornerClass && objc_getClass("TTKFeedTabCornerItemManager")) %init(LiveCornerList);
 }

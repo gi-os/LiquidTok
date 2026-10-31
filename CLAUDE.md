@@ -53,9 +53,9 @@ screen yet, so changing one means a default write (a future sidebar menu, like L
   decrypted `__TEXT` itself can't be checked (Apple hashed it encrypted). `build.sh` runs it; it needs
   macOS (`/usr/bin/openssl`, the system root keychain).
 - `scripts/patch_duo.sh`  on the verified base IPA: raises TikTok's linked SDK 27.0 -> 27.1 (`vtool`), the
-  iPhone Duo full-edge layout; sets `UIDesignRequiresCompatibility` (classic chrome, which is what removed
-  TikTok's Liquid Glass tab-bar strip on the Duo); bumps `CFBundleVersion` per run, or iOS won't install a
-  new build over the old one.
+  iPhone Duo full-edge layout; leaves `UIDesignRequiresCompatibility` false as shipped (true makes TikTok
+  hand its real tab bar to UIKit, which squeezes it into the Duo's status strip); bumps `CFBundleVersion`
+  per run, or iOS won't install a new build over the old one.
 - `scripts/build.sh`   fetch the base IPA (`BASE_IPA_URL`, default the pinned 47.5.0 release), **verify it**,
   patch it, `make package`, inject with `cyan`. Output `out/LiquidTok.ipa` (unsigned).
 - `.github/workflows/build.yml`  job `ipa`: the pipeline on macOS runners (unsigned, no secrets); job

@@ -38,13 +38,10 @@ fi
 /usr/libexec/PlistBuddy -c "Set :DTSDKName iphoneos$TARGET" "$APP/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Set :DTPlatformVersion $TARGET" "$APP/Info.plist" 2>/dev/null || true
 
-# Opt TikTok's standard UIKit chrome OUT of the iOS 26+ Liquid Glass redesign (it ships with this key = 0,
-# i.e. Liquid Glass on; linking at 27.1 then renders bars/controls as Liquid Glass — the glass strip on
-# the Duo's right edge). Setting it true uses the classic (non-glass) look while the 27.1 full-edge layout
-# stays. This is the opposite of LiquidBird's patch_glass.sh, which removes the key to GET Liquid Glass.
-/usr/libexec/PlistBuddy -c "Set :UIDesignRequiresCompatibility true" "$APP/Info.plist" 2>/dev/null || \
-  /usr/libexec/PlistBuddy -c "Add :UIDesignRequiresCompatibility bool true" "$APP/Info.plist" 2>/dev/null || true
-echo "UIDesignRequiresCompatibility -> true (classic chrome, no Liquid Glass)"
+# UIDesignRequiresCompatibility stays as TikTok ships it (false). With it true, TikTok hands its real tab bar
+# to UIKit, which on the Duo squeezes it into the status-bar strip or a top/side container; with it false
+# TikTok keeps its own full-width bar and UIKit only gets a stand-in (Tiling.x hides what UIKit draws for
+# that stand-in, and turns TikTok's own Liquid Glass tab bar off).
 
 # Give each build a distinct, higher CFBundleVersion (base is 475038) so iOS installs it over the one
 # already on the device instead of treating it as the same version and skipping it. The short version
