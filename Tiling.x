@@ -10,6 +10,35 @@
 // didn't remove the Duo status pill. Both need the real view frames (Debug.x 4-finger dump) to get right,
 // so they're left out rather than shipped broken.
 
+@interface AWEFeedContainerViewController : UIViewController @end
+@interface AWEFeedRootViewController : UIViewController @end
+
+// MARK: - Hide the Duo's status/camera pill in the feed
+
+// On the Duo the status bar is a Liquid Glass strip down the trailing edge, over the feed. Hiding the
+// status bar removes it (Apple's Duo guidance). Only on the Duo and only in the feed VCs, and this time
+// forcing a status-bar update so the change actually applies (the earlier try set the value but never
+// refreshed). If the pill survives this, it's a system-reserved element (like the Dynamic Island) an app
+// can't remove.
+static BOOL LTIsDuo(UIViewController *vc) {
+    UIScreen *screen = vc.viewIfLoaded.window.windowScene.screen ?: UIScreen.mainScreen;
+    CGSize s = screen.bounds.size;
+    return MIN(s.width, s.height) >= 440;   // folded Duo is ~466pt across; no upright iPhone is that wide
+}
+
+%group StatusBar
+%hook AWEFeedRootViewController
+- (BOOL)prefersStatusBarHidden { return LTIsDuo(self) ? YES : %orig; }
+- (UIViewController *)childViewControllerForStatusBarHidden { return LTIsDuo(self) ? nil : %orig; }
+- (void)viewDidAppear:(BOOL)animated { %orig; if (LTIsDuo(self)) [self setNeedsStatusBarAppearanceUpdate]; }
+%end
+%hook AWEFeedContainerViewController
+- (BOOL)prefersStatusBarHidden { return LTIsDuo(self) ? YES : %orig; }
+- (UIViewController *)childViewControllerForStatusBarHidden { return LTIsDuo(self) ? nil : %orig; }
+- (void)viewDidAppear:(BOOL)animated { %orig; if (LTIsDuo(self)) [self setNeedsStatusBarAppearanceUpdate]; }
+%end
+%end
+
 // MARK: - Keep the feed's top corner items clear of the Duo camera
 
 // The feed's top corner items (the search button, etc.) must stay inside the safe area so they don't
@@ -33,5 +62,6 @@
 
 %ctor {
     if (objc_getClass("AWEFeedContainerViewController")) %init(SearchSafeArea);
+    if (objc_getClass("AWEFeedContainerViewController") || objc_getClass("AWEFeedRootViewController")) %init(StatusBar);
     if (objc_getClass("TTKTabBarManager")) %init(TabHeight);
 }
