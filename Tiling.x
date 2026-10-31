@@ -17,6 +17,30 @@
 %end
 %end
 
+// MARK: - Hide the Duo's status pill in the feed
+
+// On the Duo, the status bar is a Liquid Glass pill running down the trailing edge, over the feed and its
+// action column. Giovanni wants it gone; the only way an app can remove it is to hide the status bar
+// (Apple's Duo guidance: hiding the status bar removes the pill and its region). Only on the Duo (its
+// displays are wider than any iPhone held upright) and only in the feed, so a normal phone and other
+// screens keep their status bar. Costs the clock/Wi-Fi in the feed.
+static BOOL LTIsDuo(UIViewController *vc) {
+    UIScreen *screen = vc.viewIfLoaded.window.windowScene.screen ?: UIScreen.mainScreen;
+    CGSize s = screen.bounds.size;
+    return MIN(s.width, s.height) >= 440;   // folded Duo is ~466pt across; no upright iPhone is that wide
+}
+
+%group StatusBar
+%hook AWEFeedContainerViewController
+- (BOOL)prefersStatusBarHidden { return LTIsDuo(self) ? YES : %orig; }
+- (UIViewController *)childViewControllerForStatusBarHidden { return LTIsDuo(self) ? nil : %orig; }
+%end
+%hook AWEFeedRootViewController
+- (BOOL)prefersStatusBarHidden { return LTIsDuo(self) ? YES : %orig; }
+- (UIViewController *)childViewControllerForStatusBarHidden { return LTIsDuo(self) ? nil : %orig; }
+%end
+%end
+
 // MARK: - Keep the right action column clear of the Duo status/camera pill
 
 // The right-side like/comment/share/save column hugs the screen edge, so on the Duo it overlaps the
@@ -51,6 +75,7 @@ static CGFloat LTRightSafeInset(void) {
 
 %ctor {
     if (objc_getClass("AWEFeedContainerViewController")) %init(SearchSafeArea);
+    if (objc_getClass("AWEFeedContainerViewController") || objc_getClass("AWEFeedRootViewController")) %init(StatusBar);
     if (objc_getClass("AWEPlayInteractionRightElement")) %init(ActionColumn);
     if (objc_getClass("TTKTabBarManager")) %init(TabHeight);
 }
