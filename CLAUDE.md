@@ -16,8 +16,9 @@ A TikTok with none of the stuff Giovanni doesn't want, and a layout that works o
 6. **No tracking**: ByteDance's event log, Heimdallr telemetry, AppsFlyer, Firebase, Facebook; IDFA zeroed
    and App Tracking Transparency answered "denied" with no prompt. (Likes/follows/comments still work —
    they're API calls, not events — so For You learns less but isn't blind.)
-7. **Duo sidebar**: on the Duo's wide poses the bottom tab bar becomes a floating glass rail down the
-   trailing strip, so the video keeps the whole screen; plain iPhones and the folded pose stay stock.
+7. **Duo layout**: TikTok fills the Duo's inner display edge to edge (relinked at the iOS 27.1 SDK) with
+   TikTok's own plain bottom tab bar in every pose: no glass, no custom rail (Giovanni tried the glass
+   sidebar and wants the normal bar).
 
 All seven are on by default and toggle in `NSUserDefaults` (keys in `LiquidTok.h`); there's no settings
 screen yet, so changing one means a default write (a future sidebar menu, like LiquidBird's logo menu).
@@ -25,21 +26,25 @@ screen yet, so changing one means a default write (a future sidebar menu, like L
 ## Layout
 - `LiquidTok.h`   switch keys; runtime-messaging helpers that check a selector's return type first (so a
   dropped or changed selector is a no-op, not a crash); `LTIsShopKey` (shop/mall/ecom name match).
-- `Tweak.x`       the feed filter and Shop removal. A post that's an ad/sponsored/product/AI comes back nil
-  from `AWEAwemeModel -initWithDictionary:error:`, so no feed, profile grid or search result shows it
-  (BHTikTok's `isAds` filter, widened to the other four over the model's commerce/AIGC/product fields).
+- `Tweak.x`       the feed filter and Shop removal. A post that's an ad/sponsored/product/AI is dropped from
+  the parsed list (`-setAwemeList:` on the feed, profile, hashtag and sound response models), judged on the
+  model's commerce/AIGC/product fields. Never filter by returning nil from `AWEAwemeModel
+  -initWithDictionary:error:`: TikTok parses a page with Mantle, one nil post fails the whole page, and the
+  feed stops refreshing. Your own Saved/Liked lists aren't filtered. Also off: overlay info cards, the
+  avatar follow badge, LIVE (corner item `TTKFeedTabCornerLiveItem`, in-feed lives), the search teaser.
   Shop is taken out of the tab configs TikTok builds its bars from (`TTKFeedTopTabControlConfig`,
   `TTKTabEntranceResult`, `TTKTabFCPConfigCheckResult`, `TTKFeedTopTabEntranceConfig`) and, as a backstop,
   out of `TTKTabBarController buttonsForTabBar`. Splash ads off via `AWESplashManager`/`BDASplashManager`.
 - `Tracking.x`    the SDK silencers: `BDTrackerProtocol`/`TTTracker` event log, `HMDTTMonitor`, `AppsFlyerLib`,
   `FIRAnalytics`, `FBSDKAppEvents`, plus `ASIdentifierManager`/`ATTrackingManager`. Each `%orig` is gated on
   the switch so flipping it off restores TikTok's own behaviour.
-- `Tiling.x`      the Duo sidebar. On a window >= 600pt wide, or one with the side status-bar strip
-  (`LTSideStrip`), TikTok's `TTKTabBar` fades out and a glass rail of snapshots of its own
-  `TTKTabBarButton`s is drawn down the strip; a tap forwards to `TTKTabBarController setSelectedIndex:`.
-  Snapshots (not our own icons) so the rail always matches TikTok's current art, Shop already removed.
-- `Debug.x`       three-finger long press copies the view/VC hierarchy + the filter tally to the pasteboard,
-  for Giovanni to paste; how class names get verified without FLEX. Defines `LTLog`.
+- `Tiling.x`      the Duo layout: keeps the feed's corner items (search) inside the safe area, away from the
+  camera, and shortens the bottom tab bar. Change layout only from real frames (the dumps below), never by
+  guessing from screenshots: blind nudges split the action column from its counts more than once.
+- `Debug.x`       four-finger long press (three is the Duo's system copy/paste) copies the view/VC hierarchy,
+  the tab bar/corner/side-panel frames in window coordinates and the filter tally to the pasteboard.
+  A diagnostic build (workflow input `dump_url`) also POSTs that dump to `scripts/dump_receiver.sh` on the
+  Mac mini at launch and whenever the window shape or the screen on top changes. Defines `LTLog`.
 - `LiquidTok.plist`  bundle filter (`com.zhiliaoapp.musically`).
 - `scripts/verify_ipa.py`  the trust gate: the base IPA is a decrypted build from a stranger's GitHub
   release, so before anything is injected this checks it's still Apple's — every Mach-O carries its App
@@ -47,8 +52,12 @@ screen yet, so changing one means a default write (a future sidebar menu, like L
   hashes to the code directory, every sealed resource is unchanged and nothing unsealed was added. The
   decrypted `__TEXT` itself can't be checked (Apple hashed it encrypted). `build.sh` runs it; it needs
   macOS (`/usr/bin/openssl`, the system root keychain).
+- `scripts/patch_duo.sh`  on the verified base IPA: raises TikTok's linked SDK 27.0 -> 27.1 (`vtool`), the
+  iPhone Duo full-edge layout; sets `UIDesignRequiresCompatibility` (classic chrome, which is what removed
+  TikTok's Liquid Glass tab-bar strip on the Duo); bumps `CFBundleVersion` per run, or iOS won't install a
+  new build over the old one.
 - `scripts/build.sh`   fetch the base IPA (`BASE_IPA_URL`, default the pinned 47.5.0 release), **verify it**,
-  `make package`, inject with `cyan`. Output `out/LiquidTok.ipa` (unsigned).
+  patch it, `make package`, inject with `cyan`. Output `out/LiquidTok.ipa` (unsigned).
 - `.github/workflows/build.yml`  job `ipa`: the pipeline on macOS runners (unsigned, no secrets); job
   `sign`: ad-hoc signs it (`fastlane/Fastfile`, match certs from gi-os/ios-certs) as `com.gios.liquidtok`
   for every registered device, strips app extensions, uploads `LiquidTok-adhoc` encrypted, deletes the
@@ -56,6 +65,9 @@ screen yet, so changing one means a default write (a future sidebar menu, like L
 - `scripts/install_link.sh [run-id] [minutes]`  on the Mac mini: serves a run's `LiquidTok-adhoc` as a
   tap-to-install link (Cloudflare quick tunnel, random path, stops after 20 min). Decrypts with
   `~/.config/liquidbird/artifact-key.pem` (the same key pair as LiquidBird's). Send Giovanni the link.
+- `scripts/dump_receiver.sh [minutes]`  on the Mac mini: write-only receiver for a diagnostic build's layout
+  dumps behind a quick tunnel; prints the `dump_url` to build with
+  (`gh workflow run build.yml -R gi-os/LiquidTok -f dump_url=<url>`). Dumps land in `/tmp/lt-dumps`.
 - `scripts/register_link.sh [minutes]`  on the Mac mini: one-time link that captures a new device's UDID;
   then `gh workflow run build.yml -f udid=<udid> -f device_name=<name>` registers it and re-signs.
 - `scripts/objc_dump.py` / `objc_find.py` / `objc_dis.py`  (shared with LiquidBird) read class/metadata and
