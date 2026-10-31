@@ -25,8 +25,13 @@ if [[ -z "$IPA" ]]; then
 fi
 
 # Trust gate: the base IPA must still be Apple's signed build (header, unencrypted pages and sealed
-# resources), or we don't inject into it.
+# resources), or we don't inject into it. Runs on the ORIGINAL, before any patching.
 python3 -I scripts/verify_ipa.py "$IPA"
+
+# Follow Apple's iPhone Duo guidance: raise the linked SDK to 27.1 so the system gives TikTok the
+# full-edge inner-display layout (no half-letterbox). Modifies the binary, so it runs after verify.
+./scripts/patch_duo.sh "$IPA" out/TikTok-duo.ipa
+IPA="out/TikTok-duo.ipa"
 
 rm -rf packages   # make clean keeps old debs, and every deb here gets injected
 make clean package FINALPACKAGE=1
