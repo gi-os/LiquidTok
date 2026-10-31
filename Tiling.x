@@ -17,6 +17,28 @@
 %end
 %end
 
+// MARK: - Keep the right action column clear of the Duo status/camera pill
+
+// The right-side like/comment/share/save column hugs the screen edge, so on the Duo it overlaps the
+// system status pill (time/Wi-Fi/camera) that runs down the trailing edge. Widen its right margin by the
+// window's right safe-area inset (0 on a normal phone, the pill's width on the Duo) so it sits just left
+// of the pill — interactive controls inside the safe area, per Apple's Duo guidance.
+static CGFloat LTRightSafeInset(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows)
+            if (w.isKeyWindow) return w.safeAreaInsets.right;
+    }
+    return 0;
+}
+
+%group ActionColumn
+%hook AWEPlayInteractionRightElement
+- (double)rightMarginWidth { return %orig + LTRightSafeInset(); }
+- (double)rightMarginWidthMusic { return %orig + LTRightSafeInset(); }
+%end
+%end
+
 // MARK: - A slightly shorter bottom tab bar
 
 // The manager is the single authority contentViewDesireFrame reads, so one hook moves both the bar and
@@ -29,5 +51,6 @@
 
 %ctor {
     if (objc_getClass("AWEFeedContainerViewController")) %init(SearchSafeArea);
+    if (objc_getClass("AWEPlayInteractionRightElement")) %init(ActionColumn);
     if (objc_getClass("TTKTabBarManager")) %init(TabHeight);
 }
