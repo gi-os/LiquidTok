@@ -3,9 +3,10 @@
 
 // The Duo layout. TikTok's binary is linked at 27.1 (scripts/patch_duo.sh), so the system gives it the
 // full-edge inner-display layout per Apple's Duo guidance; no runtime window resizing and no custom
-// sidebar. This file keeps TikTok's plain phone layout in every pose (no Liquid Glass tab bar, the bottom
-// bar when unfolded, no iPad split shell), turns on the Duo fixes TikTok already ships behind server
-// flags, keeps the feed's search/corner items inside the safe area and shortens the bottom bar.
+// sidebar. TikTok's own bottom tab bar (no Liquid Glass) runs along the bottom in every pose; unfolded
+// landscape also gets TikTok's tablet layout (its split shell: Profile/Inbox in a side panel beside the
+// feed), while unfolded portrait and folded stay phone layout. This file also turns on the Duo fixes TikTok
+// ships behind server flags, keeps the feed's search/corner items inside the safe area and shortens the bar.
 //
 // NOT done, and why: shifting TikTok's right action column (AWEPlayInteractionRightElement rightMarginWidth)
 // to clear the status pill split the icons from their counts; and hiding the status bar on the feed VCs
@@ -108,22 +109,24 @@ static void LTPinGlassGateOff(void) {
 %end
 %end
 
-// MARK: - The phone shell on the unfolded Duo, not TikTok's split shell
+// MARK: - TikTok's tablet layout (its split shell) on the unfolded Duo
 
-// TikTok ships its iPad "split shell" switched on for the iPhone Duo (ttk_split_framework_enable defaults
-// on for iPhone19,4) and installs it once the window is >= 816pt wide (unfolded landscape): the window's
-// root becomes a split host with a side panel (the "<" handle) and TTKTabBarController stops sizing its own
-// content. Every reader goes through one cached class method (dispatch_once, so hooked before TikTok first
-// asks); NO is what every other iPhone computes. This doesn't move the tab bar; DuoBottomTabBar does.
-%group NoSplitShell
+// TikTok ships its iPad "split shell" switched on for the iPhone Duo (ttk_split_framework_enable defaults on
+// for iPhone19,4). With it on, TikTok makes a split host the window's root in every pose (a navigation
+// controller > TUXSidePanelController > TTKTabBarController as the main column), and once the window is at
+// least 816pt wide (unfolded landscape; unfolded portrait is 669pt, so it keeps the phone layout, as an iPad
+// mini does upright) it opens Profile, Inbox and the like in a side panel beside the feed. The real tab bar
+// stays at the bottom of the main column (DuoBottomTabBar keeps it a bottom bar). Both answers are cached
+// (dispatch_once) and hooked before TikTok first asks, so a server flag can't flip the shell between launches.
+%group SplitShell
 %hook TTKTabBarManager
-+ (BOOL)isSplitShellFrameworkEnabled { return NO; }
++ (BOOL)isSplitShellFrameworkEnabled { return YES; }
 %end
 %end
 
-%group NoSplitGate
+%group SplitGate
 %hook TTKSplitFrameworkGate
-+ (BOOL)isEnabled { return NO; }
++ (BOOL)isEnabled { return YES; }
 %end
 %end
 
@@ -136,9 +139,12 @@ static void LTPinGlassGateOff(void) {
 // class (pad_updateTraitOverrides), but only on iPads. Do it here on the phone idiom: the tab bar controller
 // reads compact, so UIKit lays out the phone bottom bar, and every tab gets the window's real width class
 // back, so the screens inside don't change. Written only when it differs, so it's cheap and follows
-// fold/unfold.
+// fold/unfold. A tab the split shell later docks into its side panel leaves this controller, so its width
+// override is removed again and it inherits as usual.
 @interface TTKTabBarController : UITabBarController
 @end
+
+static NSHashTable<UIViewController *> *gLTSizedTabs;   // the tabs DuoBottomTabBar gave the window's width class
 
 %group DuoBottomTabBar
 %hook TTKTabBarController
@@ -150,9 +156,18 @@ static void LTPinGlassGateOff(void) {
                 self.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClassCompact;
                 LTLog(@"Duo: tab bar controller set to compact width (window h%ld)", (long)scene.horizontalSizeClass);
             }
+            if (!gLTSizedTabs) gLTSizedTabs = [NSHashTable weakObjectsHashTable];
+            for (UIViewController *vc in gLTSizedTabs.allObjects) {
+                if (vc.parentViewController == self) continue;
+                [vc.traitOverrides removeTrait:UITraitHorizontalSizeClass.class];
+                [gLTSizedTabs removeObject:vc];
+                LTLog(@"Duo: %@ left the tab bar controller; its width class is inherited again", NSStringFromClass(vc.class));
+            }
             UIUserInterfaceSizeClass real = scene.horizontalSizeClass;
-            for (UIViewController *child in self.childViewControllers)
+            for (UIViewController *child in self.childViewControllers) {
                 if (child.traitCollection.horizontalSizeClass != real) child.traitOverrides.horizontalSizeClass = real;
+                [gLTSizedTabs addObject:child];
+            }
         }
     }
     %orig;
@@ -250,8 +265,8 @@ static void LTHideChrome(UIView *v, NSString *where) {
     if (objc_getClass("TTKTabBar")) %init(NoGlassBar);
     if (objc_getClass("TTKTabBarButtonDefaultContentView")) %init(NoGlassButtons);
     if (objc_getClass("TTKTransitionTabBarSnapshotHelper")) %init(NoGlassSnapshot);
-    if (objc_getClass("TTKTabBarManager")) %init(NoSplitShell);
-    if (objc_getClass("TTKSplitFrameworkGate")) %init(NoSplitGate);
+    if (objc_getClass("TTKTabBarManager")) %init(SplitShell);
+    if (objc_getClass("TTKSplitFrameworkGate")) %init(SplitGate);
     if (objc_getClass("TTKTabBarController")) %init(DuoBottomTabBar);
     gLTStandInTabBarClass = objc_getClass("TTKFakeTabBar");
     if (gLTStandInTabBarClass && objc_getClass("TTKTabBarController")) %init(HideStandInChrome);

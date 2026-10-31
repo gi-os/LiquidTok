@@ -219,8 +219,12 @@ static NSString *LTShape(UIWindow *w) {
     for (int depth = 0; vc && depth < 12; depth++) {
         [shape appendFormat:@">%@", NSStringFromClass(vc.class)];
         UIViewController *next = vc.presentedViewController;
+        id side = next ? nil : LTObj(vc, @"secondaryViewController");   // TikTok's split shell: its side panel
+        if ([side isKindOfClass:UIViewController.class])
+            [shape appendFormat:@"[side %@ state %lld]", NSStringFromClass([side class]), LTInt(vc, @"state")];
         if (!next) next = LTObj(vc, @"selectedViewController");
         if (!next && [vc isKindOfClass:UINavigationController.class]) next = ((UINavigationController *)vc).topViewController;
+        if (!next) next = LTObj(vc, @"primaryViewController");          // ...and its main column, the tab bar controller
         vc = [next isKindOfClass:UIViewController.class] ? next : nil;
     }
     return shape;

@@ -17,8 +17,11 @@ A TikTok with none of the stuff Giovanni doesn't want, and a layout that works o
    and App Tracking Transparency answered "denied" with no prompt. (Likes/follows/comments still work —
    they're API calls, not events — so For You learns less but isn't blind.)
 7. **Duo layout**: TikTok fills the Duo's inner display edge to edge (relinked at the iOS 27.1 SDK) with
-   TikTok's own plain bottom tab bar in every pose: no glass, no custom rail (Giovanni tried the glass
-   sidebar and wants the normal bar).
+   its own plain bottom tab bar in every pose (no glass, no custom rail). Unfolded landscape also gets
+   TikTok's own tablet layout — its split shell: Profile, Inbox and similar screens open in a side panel
+   beside the feed, the bar along the bottom of the main column. Unfolded portrait (669pt, below TikTok's
+   816pt breakpoint) and folded stay phone layout. `patch_duo.sh` must not change `DTXcode` (2700): the
+   816pt breakpoint and the full-width main column both key off it.
 
 All seven are on by default and toggle in `NSUserDefaults` (keys in `LiquidTok.h`); there's no settings
 screen yet, so changing one means a default write (a future sidebar menu, like LiquidBird's logo menu).
@@ -38,9 +41,11 @@ screen yet, so changing one means a default write (a future sidebar menu, like L
 - `Tracking.x`    the SDK silencers: `BDTrackerProtocol`/`TTTracker` event log, `HMDTTMonitor`, `AppsFlyerLib`,
   `FIRAnalytics`, `FBSDKAppEvents`, plus `ASIdentifierManager`/`ATTrackingManager`. Each `%orig` is gated on
   the switch so flipping it off restores TikTok's own behaviour.
-- `Tiling.x`      the Duo layout: keeps the feed's corner items (search) inside the safe area, away from the
-  camera, and shortens the bottom tab bar. Change layout only from real frames (the dumps below), never by
-  guessing from screenshots: blind nudges split the action column from its counts more than once.
+- `Tiling.x`      the Duo layout: TikTok's own bottom bar in every pose (no glass — its Liquid Glass tab bar
+  gate pinned off, UIKit's chrome around/inside the stand-in `TTKFakeTabBar` hidden), TikTok's split shell
+  on for the unfolded tablet layout, a compact width override so the bar stays a bottom bar, search/corner
+  items inside the safe area, TikTok's own `TTKABTest` Duo fixes on, shorter bar. Change layout only from
+  real frames (the dumps, `scripts/dump_receiver.sh`), never by guessing from screenshots.
 - `Debug.x`       four-finger long press (three is the Duo's system copy/paste) copies the view/VC hierarchy,
   the tab bar/corner/side-panel frames in window coordinates and the filter tally to the pasteboard.
   A diagnostic build (workflow input `dump_url`) also POSTs that dump to `scripts/dump_receiver.sh` on the
