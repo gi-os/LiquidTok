@@ -40,6 +40,27 @@
 %end
 %end
 
+// MARK: - Full-bleed feed video under the bar when unfolded
+
+// Folded (compact width) the feed is full-bleed: AWENewFeedTableView (id=TTKFeedTableViewService) has a 0
+// bottom content inset, so the video fills behind the overlaid bar. Unfolded (regular width), TikTok's
+// split/pad layout reserves the tab bar's height as the table's bottom inset (44pt in both unfolded poses,
+// per the dumps: portrait with the bar docked and landscape with it floating, so it's an explicit inset,
+// not the safe area), which leaves a dark band below the video. The video surface
+// (TTKFeedPlayerContainerView/TTPlayerView) is already full-screen in every pose, and the feed overlay (the
+// progress bar) sits a fixed 71pt up regardless, so pinning only this one table's bottom inset to 0 makes
+// every pose match folded's full-bleed. Folded is already 0, so it's a no-op there; the split-shell side
+// panel (separate navigation controllers) and the overlay are untouched. Don't zero the shared
+// preferTabBarHeight or flip isTabBarLayoutEnabled: those also move the folded overlay / the side panel.
+%group FeedFullBleed
+%hook AWENewFeedTableView
+- (void)setContentInset:(UIEdgeInsets)inset {
+    inset.bottom = 0;
+    %orig(inset);
+}
+%end
+%end
+
 // MARK: - A slightly shorter bottom tab bar
 
 // The manager is the single authority contentViewDesireFrame reads, so one hook moves both the bar and
@@ -260,6 +281,7 @@ static void LTHideChrome(UIView *v, NSString *where) {
     if (objc_getClass("AWEFeedContainerViewController")) %init(SearchSafeArea);
     if (objc_getClass("TTKFeedTopTabUIConfig")) %init(CornerSafeArea);
     if (objc_getClass("TTKTabBarManager")) %init(TabHeight);
+    if (objc_getClass("AWENewFeedTableView")) %init(FeedFullBleed);
     if (objc_getClass("TTKTabBarLiquidGlassConfig")) { %init(NoGlassConfig); LTPinGlassGateOff(); }
     if (objc_getClass("TTKBizUIComponentDependencyImpl")) %init(NoGlassDependency);
     if (objc_getClass("TTKTabBar")) %init(NoGlassBar);
