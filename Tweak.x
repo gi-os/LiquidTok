@@ -163,11 +163,11 @@ static void LTFilterListSetter(NSString *className) {
 %end
 %end
 
-// The red "+" follow badge on the author's avatar in the feed's action column: keep it off.
+// The "+" follow badge on the author's avatar shows as normal, but tapping it doesn't follow: the badge is
+// there, the follow action from the feed isn't (Giovanni wants to see the + but not follow from the video).
 %group FollowButton
 %hook AWEPlayInteractionUserAvatarElement
-- (BOOL)canFollowAuthor { return NO; }
-- (void)switchFollowButtonVisibility:(BOOL)visible { %orig(NO); }
+- (void)onFollowViewClicked:(id)sender { /* show the +, but don't follow from the feed */ }
 %end
 %end
 

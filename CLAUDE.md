@@ -34,7 +34,7 @@ screen yet, so changing one means a default write (a future sidebar menu, like L
   model's commerce/AIGC/product fields. Never filter by returning nil from `AWEAwemeModel
   -initWithDictionary:error:`: TikTok parses a page with Mantle, one nil post fails the whole page, and the
   feed stops refreshing. Your own Saved/Liked lists aren't filtered. Also off: overlay info cards, the
-  avatar follow badge, LIVE (corner item `TTKFeedTabCornerLiveItem`, in-feed lives), the search teaser.
+  avatar follow + (shown, but tapping it doesn't follow from the feed), LIVE (corner item `TTKFeedTabCornerLiveItem`, in-feed lives), the search teaser.
   Shop is taken out of the tab configs TikTok builds its bars from (`TTKFeedTopTabControlConfig`,
   `TTKTabEntranceResult`, `TTKTabFCPConfigCheckResult`, `TTKFeedTopTabEntranceConfig`) and, as a backstop,
   out of `TTKTabBarController buttonsForTabBar`. Splash ads off via `AWESplashManager`/`BDASplashManager`.
