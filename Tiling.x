@@ -40,6 +40,47 @@
 %end
 %end
 
+// MARK: - Fullscreen feed video on the unfolded Duo (portrait)
+//
+// Unfolded, TikTok's "dynamic video layout" (its wide-container feature) shrinks the 9:16 feed video to a
+// ~557pt-wide box centred in the 669pt window and fills the ~56pt side bars with a full-window gaussian-blur
+// copy of it. The whole feature is gated by one class method,
+// +[AWEFeedInteractionElementScreenAdaptor shouldEnableDynamicVideoLayout] (verified 0x1b3148b4): on the Duo
+// it ANDs a device check with a server flag read through ABTestCodeGen (NOT TTKABTest, so DuoFixes can't
+// reach it — the gate itself must be hooked). Its consumer applies NOTHING when the gate is NO, so the player
+// falls back to its default aspect-fill — the same fullscreen every compact/narrow iPhone (and the folded
+// Duo) already shows via this exact path. Force it off on the unfolded PORTRAIT screen so the video fills
+// edge to edge: no side bars, no gaussian, and the still cover follows (it forwards the same gate).
+//
+// Scope: regular width only, so FOLDED (compact) is never touched (%orig). And portrait only: aspect-filling
+// a 9:16 video into the 951x669 landscape window is a ~60% vertical crop (a thin band of the clip), worse
+// than TikTok's landscape fit (whole video, blurred sides) — so unfolded landscape stays %orig too, which
+// also leaves the split-shell side panel alone. Only the feed video's gravity changes.
+static BOOL LTFeedWantsFullscreenFill(void) {
+    if (!NSThread.isMainThread) return NO;   // scene traits are main-thread; off-main (preload) keeps %orig
+    UIWindowScene *best = nil;
+    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+        if (![s isKindOfClass:UIWindowScene.class]) continue;
+        if (s.activationState == UISceneActivationStateForegroundActive) { best = (UIWindowScene *)s; break; }
+        if (!best) best = (UIWindowScene *)s;
+    }
+    if (!best || best.traitCollection.horizontalSizeClass != UIUserInterfaceSizeClassRegular) return NO; // folded/compact
+    CGRect b = best.coordinateSpace.bounds;
+    return b.size.height > b.size.width;     // unfolded portrait only (landscape fill = heavy crop)
+}
+
+%group FullscreenFeedVideo
+%hook AWEFeedInteractionElementScreenAdaptor
++ (BOOL)shouldEnableDynamicVideoLayout {
+    if (LTFeedWantsFullscreenFill()) {
+        LTLog(@"Duo: unfolded portrait - feed wide-container pillarbox+blur off, native aspect-fill");
+        return NO;
+    }
+    return %orig;
+}
+%end
+%end
+
 // MARK: - Full-bleed feed video under the bar when unfolded
 
 // Folded (compact width) the feed is full-bleed: AWENewFeedTableView (id=TTKFeedTableViewService) has a 0
@@ -282,6 +323,7 @@ static void LTHideChrome(UIView *v, NSString *where) {
     if (objc_getClass("TTKFeedTopTabUIConfig")) %init(CornerSafeArea);
     if (objc_getClass("TTKTabBarManager")) %init(TabHeight);
     if (objc_getClass("AWENewFeedTableView")) %init(FeedFullBleed);
+    if (objc_getClass("AWEFeedInteractionElementScreenAdaptor")) %init(FullscreenFeedVideo);
     if (objc_getClass("TTKTabBarLiquidGlassConfig")) { %init(NoGlassConfig); LTPinGlassGateOff(); }
     if (objc_getClass("TTKBizUIComponentDependencyImpl")) %init(NoGlassDependency);
     if (objc_getClass("TTKTabBar")) %init(NoGlassBar);
