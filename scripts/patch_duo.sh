@@ -43,12 +43,12 @@ fi
 # TikTok keeps its own full-width bar and UIKit only gets a stand-in (Tiling.x hides what UIKit draws for
 # that stand-in, and turns TikTok's own Liquid Glass tab bar off).
 
-# Give each build a distinct, higher CFBundleVersion (base is 475038) so iOS installs it over the one
+# Give each build a distinct, higher CFBundleVersion (base is 476038) so iOS installs it over the one
 # already on the device instead of treating it as the same version and skipping it. The short version
-# (47.5.0) stays, since TikTok's own code keys off that.
+# (47.6.0) stays, since TikTok's own code keys off that.
 BUILD_NUM="${GITHUB_RUN_NUMBER:-$(date +%s)}"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 475038.$BUILD_NUM" "$APP/Info.plist" 2>/dev/null || true
-echo "CFBundleVersion -> 475038.$BUILD_NUM"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 476038.$BUILD_NUM" "$APP/Info.plist" 2>/dev/null || true
+echo "CFBundleVersion -> 476038.$BUILD_NUM"
 
 rm -f "$OUT"
 ( cd "$WORK" && zip -qry "$OUT" Payload )

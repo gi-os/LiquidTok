@@ -16,8 +16,8 @@ done
 
 mkdir -p out
 # The base decrypted App Store IPA. Overridable with BASE_IPA_URL (a release of a decrypted
-# com.zhiliaoapp.musically); the tweak targets 47.5's class names.
-: "${BASE_IPA_URL:=https://github.com/talhaeenss/TweakiTok/releases/download/base-ipa-47.5.0/com.zhiliaoapp.musically-47.5.0-Decrypted.ipa}"
+# com.zhiliaoapp.musically); the tweak targets 47.6's class names.
+: "${BASE_IPA_URL:=https://github.com/talhaeenss/TweakiTok/releases/download/base-ipa-47.6.0/com.zhiliaoapp.musically-47.6.0-Decrypted.ipa}"
 if [[ -z "$IPA" ]]; then
   IPA="out/TikTok-base.ipa"
   echo "Fetching the base IPA..."

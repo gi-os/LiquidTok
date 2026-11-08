@@ -114,7 +114,7 @@ static BOOL LTFeedWantsFullscreenFill(void) {
 
 // MARK: - TikTok's plain tab bar, not its Liquid Glass one
 
-// TikTok 47.5 draws its own Liquid Glass tab bar when TTKTabBarLiquidGlassConfig allows it. On the Duo
+// TikTok 47.6 draws its own Liquid Glass tab bar when TTKTabBarLiquidGlassConfig allows it. On the Duo
 // that hinges on a fold-screen server flag (ttk_tabbar_fold_screen_liquid_glass_enabled) that only counts
 // once TikTok's online settings have loaded, which is why the glass came and went between launches.
 // Giovanni wants TikTok's plain bar, so the gate, the bar's own check and the button layout all say no.
@@ -126,8 +126,8 @@ static BOOL LTFeedWantsFullscreenFill(void) {
 
 // The gate is Swift: its ObjC method and its 12 direct Swift callers (tab bar setup, colours, layout, button
 // layout, background alpha) all branch through one function pointer in MusicallyCore's writable __DATA
-// (trampoline 0x1aeced34 loads slot 0x331702f8; arm64, no pointer authentication). Point it at a C "no", but
-// only if it still holds 47.5.0's target, so any other TikTok build is left alone.
+// (trampoline 0x1b3275e8 loads slot 0x337f7a80; arm64, no pointer authentication). Point it at a C "no", but
+// only if it still holds 47.6.0's target, so any other TikTok build is left alone.
 static BOOL LTNoLiquidGlassTabBar(void) { return NO; }
 
 static void LTPinGlassGateOff(void) {
@@ -135,12 +135,12 @@ static void LTPinGlassGateOff(void) {
         const char *name = _dyld_get_image_name(i);
         if (!name || !strstr(name, "/MusicallyCore.framework/MusicallyCore")) continue;
         uintptr_t base = (uintptr_t)_dyld_get_image_header(i);   // __TEXT's vmaddr is 0, so the header is the slide
-        uintptr_t *slot = (uintptr_t *)(base + 0x331702f8);
-        if (*slot == base + 0x1aececec) {
+        uintptr_t *slot = (uintptr_t *)(base + 0x337f7a80);
+        if (*slot == base + 0x1b3275a0) {
             *slot = (uintptr_t)LTNoLiquidGlassTabBar;
             LTLog(@"Duo: TikTok's Liquid Glass tab bar gate pinned to NO");
         } else {
-            LTLog(@"Duo: the Liquid Glass gate slot isn't 47.5.0's; left alone");
+            LTLog(@"Duo: the Liquid Glass gate slot isn't 47.6.0's; left alone");
         }
         return;
     }
@@ -293,7 +293,7 @@ static void LTHideChrome(UIView *v, NSString *where) {
 
 // MARK: - TikTok's own iPhone Duo fixes
 
-// TikTok 47.5 already carries fixes for the iPhone Duo, each behind a server test flag (TTKABTest) that a
+// TikTok 47.6 already carries fixes for the iPhone Duo, each behind a server test flag (TTKABTest) that a
 // sideloaded install isn't enrolled in. Turn ByteDance's own fixes on instead of re-deriving them: the
 // profile page, the home feed's bottom offset and insets, the Explore tab bar height, comments, stories
 // and the camera. Features (Duo remix, avatar duos) stay as the server says.
